@@ -1,0 +1,45 @@
+Options -Indexes
+
+RewriteEngine On
+
+# ==================================================
+# BLOCK SENSITIVE FOLDERS
+# ==================================================
+RewriteRule ^includes/ - [F,L]
+RewriteRule ^vendor/ - [F,L]
+
+# Page files are only reached through routes.php (route + canView check).
+RewriteRule ^(pages|employee|app)/ - [F,L]
+
+# ==================================================
+# CENTRAL API PERMISSION GATEWAY
+# Unmapped APIs pass through without a permission check.
+# ==================================================
+RewriteRule ^api/.+\.php$ api-gateway.php [L,QSA,NC]
+
+# ==================================================
+# ALLOW REAL FILES & DIRECTORIES FIRST
+# VERY IMPORTANT
+# ==================================================
+RewriteCond %{REQUEST_FILENAME} -f [OR]
+RewriteCond %{REQUEST_FILENAME} -d
+RewriteRule ^ - [L]
+
+# ==================================================
+# REMOVE .php EXTENSION
+# EXCLUDE API DIRECTORY
+# ==================================================
+# Remove .php extension (exclude api folder)
+RewriteCond %{REQUEST_URI} !/api/ [NC]
+RewriteCond %{THE_REQUEST} \s/+(.+?)\.php[\s?] [NC]
+RewriteRule ^(.+)\.php$ $1 [R=301,L]
+
+# ==================================================
+# EXCLUDE API FROM routes.php
+# ==================================================
+RewriteRule ^api/ - [L]
+
+# ==================================================
+# ROUTE EVERYTHING ELSE
+# ==================================================
+RewriteRule ^ routes.php [L,QSA]

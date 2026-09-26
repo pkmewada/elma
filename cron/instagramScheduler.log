@@ -1,0 +1,28 @@
+[2026-08-28 18:59:52] Scheduler run complete. Finalized 0 in-flight, published 0 newly due.
+[2026-08-28 19:02:30] Post #31 (Client: Praveen Mewada (000001)) recovery attempted facebook: failed: This account has no linked Facebook Page to publish to.
+[2026-08-28 19:02:30] Scheduler run complete. Finalized 0 in-flight, published 0 newly due.
+[2026-08-28 19:02:43] Post #31 (Client: Praveen Mewada (000001)) recovered: all selected platform(s) already had a persisted result — finalized without a new Meta API call.
+[2026-08-28 19:02:43] Scheduler run complete. Finalized 0 in-flight, published 0 newly due.
+[2026-08-28 19:02:55] Post #31 (Client: Praveen Mewada (000001)) recovery attempted instagram: failed transiently, will retry next run: Meta API request failed: SSL certificate problem: unable to get local issuer certificate
+[2026-08-28 19:02:55] Scheduler run complete. Finalized 0 in-flight, published 0 newly due.
+[2026-08-28 19:03:13] Post #31 (Client: Praveen Mewada (000001)) recovery attempted instagram: failed transiently, will retry next run: Meta API request failed: SSL certificate problem: unable to get local issuer certificate
+[2026-08-28 19:03:13] Post #32 (Client: Praveen Mewada (000001)) instagram: failed: This account has no linked Facebook Page to publish to.
+[2026-08-28 19:03:13] Post #32 (Client: Praveen Mewada (000001)) facebook: failed: This account has no linked Facebook Page to publish to.
+[2026-08-28 19:03:13] Scheduler run complete. Finalized 0 in-flight, published 1 newly due.
+[2026-08-28 20:22:36] Scheduler run complete. Finalized 0 in-flight, published 0 newly due.
+[2026-08-28 20:24:12] Post #34 (Client: Praveen Mewada (000001)) recovery attempted facebook: failed: This account has no linked Facebook Page to publish to.
+[2026-08-28 20:24:13] Scheduler run complete. Finalized 0 in-flight, published 0 newly due.
+[2026-08-28 21:17:39] Post #43 (Client: Praveen Mewada (000001)) facebook: failed: This account has no linked Facebook Page to publish to.
+[2026-08-28 21:17:39] Scheduler run complete. Finalized 0 in-flight, published 1 newly due.
+[2026-09-03 15:45:29] Post #20 (Client: Praveen Mewada (000001)) failed: Only photo or video can be accepted as media type.
+[2026-09-03 15:45:29] Scheduler run complete. Finalized 0 in-flight, published 1 newly due.
+[2026-09-03 15:58:09] Post #22 (Client: Praveen Mewada (000001)) published (image). Media ID: 17901371508356646
+[2026-09-03 15:58:09] Scheduler run complete. Finalized 0 in-flight, published 1 newly due.
+[2026-09-18 13:16:49] Post #26 (Client: Praveen Mewada (000001)) publish failed transiently, requeued for retry: Meta API request failed: SSL certificate problem: unable to get local issuer certificate
+[2026-09-18 13:16:49] Post #31 (Client: Praveen Mewada (000001)) publish failed transiently, requeued for retry: Meta API request failed: SSL certificate problem: unable to get local issuer certificate
+[2026-09-18 13:16:49] Post #33 (Client: Praveen Mewada (000001)) publish failed transiently, requeued for retry: Meta API request failed: SSL certificate problem: unable to get local issuer certificate
+[2026-09-18 13:16:49] Scheduler run complete. Finalized 0 in-flight, published 3 newly due.
+[2026-09-18 13:18:15] Post #26 (Client: Praveen Mewada (000001)) failed: Only photo or video can be accepted as media type.
+[2026-09-18 13:18:16] Post #31 (Client: Praveen Mewada (000001)) failed: Only photo or video can be accepted as media type.
+[2026-09-18 13:18:18] Post #33 (Client: Praveen Mewada (000001)) failed: Only photo or video can be accepted as media type.
+[2026-09-18 13:18:18] Scheduler run complete. Finalized 0 in-flight, published 3 newly due.

@@ -1,0 +1,11 @@
+# Deny all direct web access to this directory. Log files here (including
+# the new instagram-api.log) contain diagnostic data that must never be
+# reachable at https://modlus.in/logs/... — inspect them via SFTP/hosting
+# file manager instead.
+<IfModule mod_authz_core.c>
+    Require all denied
+</IfModule>
+<IfModule !mod_authz_core.c>
+    Order allow,deny
+    Deny from all
+</IfModule>

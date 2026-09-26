@@ -1,0 +1,578 @@
+# Permission Module – Current Architecture & Implementation Summary
+
+## Objective
+
+Build a scalable, database-driven permission system for the PHP/MySQL admin application that supports:
+
+* Role-based permissions
+* Employee-specific overrides
+* Centralized route protection
+* Future expansion without code changes
+
+The goal is to avoid hardcoded permissions and manage access completely from the database.
+
+---
+
+# 1. Database Structure
+
+## routesMaster
+
+Master table containing all application routes/pages.
+
+Purpose:
+
+* Single source of truth for every page.
+* Controls menu visibility, public/private pages, route hierarchy, and modules.
+
+Key Fields:
+
+text
+id
+routePath
+pageFile
+routeTitle
+moduleName
+layoutType
+iconClass
+parentRouteId
+isPublic
+isMenuVisible
+isActive
+sortOrder
+
+
+---
+
+## rolePermissions
+
+Stores default permissions for a role.
+
+Example:
+
+text
+Web Developer
+HR
+Account Manager
+SEO Executive
+
+
+Each role can have:
+
+text
+canView
+canAdd
+canEdit
+canDelete
+
+
+Permissions are assigned from Permission Setup page.
+
+---
+
+## userPermissionOverrides
+
+Stores employee-specific overrides.
+
+Purpose:
+
+Allow one employee to have permissions different from their role.
+
+Example:
+
+text
+Role: Web Developer
+
+Default:
+Employee Leads = Allowed
+
+Specific Employee:
+Employee Leads = Denied
+
+
+Stored Fields:
+
+text
+userId
+routeId
+overrideType
+canView
+canAdd
+canEdit
+canDelete
+
+
+overrideType currently uses:
+
+text
+grant
+revoke
+
+
+---
+
+# 2. Login Flow
+
+## Admin Login
+
+Uses:
+
+text
+users table
+
+
+Session:
+
+php
+$_SESSION['userId']
+
+
+Redirect:
+
+text
+/dashboard
+
+
+Role:
+
+text
+Admin
+
+
+---
+
+## Employee Login
+
+Uses:
+
+text
+employeeusers table
+
+
+Session:
+
+php
+$_SESSION['candidateId']
+
+
+Redirect:
+
+text
+/emp-dashboard
+
+
+Role:
+
+text
+employeeusers.designationName
+
+
+Examples:
+
+text
+Web Developer
+Graphic Designer
+HR Executive
+SEO Executive
+
+
+---
+
+# 3. Permission Helper
+
+Created:
+
+text
+includes/permission-helper.php
+
+
+Purpose:
+
+Central permission engine.
+
+Functions:
+
+php
+getLoggedInUserType()
+getLoggedInUserId()
+getLoggedInUserRole()
+requireRoutePermission()
+hasRoutePermission()
+
+
+---
+
+# 4. Route Protection
+
+Implemented inside:
+
+text
+routes.php
+
+
+Every page request now passes through centralized permission checking.
+
+Flow:
+
+text
+Route Request
+      ↓
+Find Route in routesMaster
+      ↓
+Check Public Page?
+      ↓
+Check User Override?
+      ↓
+Check Role Permission?
+      ↓
+Allow / Deny
+
+
+---
+
+# 5. Permission Resolution Priority
+
+Current priority:
+
+text
+1. User Permission Override
+2. Role Permission
+3. Default Deny
+
+
+Example:
+
+Role:
+
+text
+Web Developer
+
+
+Permission:
+
+text
+Employee Leads = Allowed
+
+
+Employee Override:
+
+text
+Employee Leads = Denied
+
+
+Final Result:
+
+text
+Denied
+
+
+Because User Override always wins.
+
+---
+
+# 6. Permission Setup Page
+
+Page:
+
+text
+/permission-setup
+
+
+Purpose:
+
+Manage default permissions for a role.
+
+Features:
+
+* Select Role
+* Real-time permission loading
+* View/Add/Edit/Delete permissions
+* All checkbox per route
+* Save directly into rolePermissions
+
+Current Actions:
+
+text
+View
+Add
+Edit
+Delete
+
+
+Removed:
+
+text
+Approve
+Export
+
+
+---
+
+# 7. Employee Permission System
+
+Implemented inside:
+
+text
+employee-directory.php
+
+
+Each employee now has:
+
+text
+Permission Button
+
+
+---
+
+## Permission Modal Features
+
+Loads:
+
+text
+Employee Details
+Employee Role
+Role Permissions
+Employee Overrides
+
+
+UI:
+
+text
+Module Wise Grouping
+Clean Card Layout
+Custom Override Toggle
+All Checkbox
+View/Add/Edit/Delete
+
+
+---
+
+## Custom Override Logic
+
+Toggle OFF:
+
+text
+Uses Role Permission
+
+
+Toggle ON:
+
+text
+Uses Employee Override
+
+
+---
+
+# 8. Employee Permission Save Flow
+
+Current Save Logic:
+
+For each route:
+
+text
+Custom OFF
+    ↓
+Delete Override Record
+
+Custom ON
+    ↓
+Insert / Update Override Record
+
+
+Uses:
+
+sql
+INSERT ... ON DUPLICATE KEY UPDATE
+
+
+Required Unique Key:
+
+sql
+(userId, routeId)
+
+
+This prevents duplicate permission records.
+
+---
+
+# 9. Employee Permission Loading
+
+API:
+
+text
+getEmployeePermissions.php
+
+
+Returns:
+
+text
+Employee Info
+Role Permission
+User Override
+Final Permission State
+
+
+UI automatically:
+
+text
+Checks View/Add/Edit/Delete
+Checks All Checkbox
+Handles Custom Toggle State
+
+
+---
+
+# 10. Current Permission Scope
+
+Implemented:
+
+text
+Page Level Permission
+View Permission
+Add Permission
+Edit Permission
+Delete Permission
+Role Permission
+Employee Override
+Central Route Guard
+
+
+---
+
+# 11. Security Model
+
+All protected pages use:
+
+php
+requireRoutePermission('/route-path', 'canView');
+
+
+Examples:
+
+php
+requireRoutePermission('/employee-directory', 'canView');
+requireRoutePermission('/permission-setup', 'canView');
+requireRoutePermission('/employee-leads', 'canView');
+
+
+Unauthorized access automatically redirects to:
+
+text
+Permission Denied Page
+
+
+---
+
+# 12. Completed Milestones
+
+✅ Database-driven routing
+
+✅ routesMaster implementation
+
+✅ rolePermissions implementation
+
+✅ userPermissionOverrides implementation
+
+✅ Admin login permission integration
+
+✅ Employee login permission integration
+
+✅ Central route guard
+
+✅ Permission helper
+
+✅ Permission Setup page
+
+✅ Employee Permission Modal
+
+✅ Role Permission Resolution
+
+✅ User Override Resolution
+
+✅ Default Deny Architecture
+
+✅ Clean Module-Based Permission UI
+
+---
+
+# 13. Next Planned Enhancements
+
+## Sidebar Permission Control
+
+Show only allowed menu items.
+
+text
+If canView = 0
+Hide Menu Item
+
+
+---
+
+## Button-Level Permission Control
+
+Examples:
+
+text
+Add Button
+Edit Button
+Delete Button
+Export Button
+
+
+Control using:
+
+php
+hasRoutePermission('/employee-directory', 'canAdd')
+hasRoutePermission('/employee-directory', 'canEdit')
+hasRoutePermission('/employee-directory', 'canDelete')
+
+
+---
+
+## API-Level Protection
+
+Protect APIs independently.
+
+Example:
+
+php
+requireRoutePermission('/employee-directory', 'canDelete');
+
+
+Before delete/update actions.
+
+---
+
+## Future Phase
+
+Potential upgrades:
+
+text
+Permission Templates
+Module-Wise Bulk Assignment
+Permission Audit Logs
+Critical Page Locking
+Department-Based Access
+Data-Level Permissions
+Record Ownership Rules
+Approval Workflow Permissions
+
+
+---
+
+# Final Architecture
+
+text
+routesMaster
+        ↓
+rolePermissions
+        ↓
+userPermissionOverrides
+        ↓
+permission-helper.php
+        ↓
+routes.php Route Guard
+        ↓
+Sidebar / Page / API / Button Protection
+
+
+This architecture now supports unlimited pages, unlimited roles, unlimited employees, and employee-specific permission overrides without changing application code.

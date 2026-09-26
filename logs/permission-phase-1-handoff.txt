@@ -1,0 +1,144 @@
+# Permission Module Phase 1 Handoff
+
+Date: 2026-06-17
+Scope: Core permission engine only. No UI redesign, sidebar rewrite, API rollout, or DB schema changes were done in this phase.
+
+## Completed Today
+
+1. Updated includes/permission-helper.php permission resolution.
+   - Super Admin still bypasses permission restrictions.
+   - Public routes still allow access.
+   - Always-allowed routes still allow access.
+   - Employee custom permission row now wins exactly when present.
+   - If no employee custom row exists, role/designation permission is used.
+   - If no permission exists, access is denied.
+
+2. Export permission is now ignored by the permission engine.
+   - canExport was removed from the allowed permission action list.
+   - Calling hasRoutePermission(..., 'canExport') returns false.
+   - Existing DB canExport columns were not removed.
+
+3. Updated getCurrentUserPermissions().
+   - Role permissions load first.
+   - Employee custom rows replace the role permission for that route exactly.
+   - canExport is no longer returned by this helper.
+
+4. Updated pages/permission-setup.php role save behavior.
+   - New saves write canExport as 0.
+   - Existing schema was preserved.
+
+## Verification Done
+
+1. PHP lint passed:
+   - includes/permission-helper.php
+   - pages/permission-setup.php
+
+2. Local login route still responds:
+   - http://localhost/modlus/login returns 200 OK
+
+3. Existing employee custom permission probe:
+   - Employee ID 15 custom route /emp-event-holiday:
+     - canView = 1
+     - canAdd = 1
+     - canApprove = 0
+     - canExport = 0
+
+4. Existing role fallback probe:
+   - Employee ID 8 role Web Developer route /emp-event-holiday:
+     - canView = 1
+     - canAdd = 1
+     - canExport = 0
+
+## Important Notes
+
+- No DB schema was changed today.
+- No sidebar changes were made today.
+- No API permission rollout was made today.
+- No special button permission table was added today.
+- No Route Manager UI was added today.
+
+## Continue Tomorrow From Here
+
+Recommended next phase:
+
+1. Clean Role Permission UI:
+   - Hide Export permanently. Done for the current role permission UI.
+   - Keep actions as View, Add, Edit, Delete, Approve. Done for the current role permission UI.
+   - Start module-wise display instead of a giant route table. Basic grouped display is done.
+
+2. Clean Employee Permission UI:
+   - Show Role Default vs Custom Permission clearly.
+   - Custom OFF = delete user override row.
+   - Custom ON = save exact row values.
+
+3. Sidebar permission control:
+   - Hide menu items where canView is false.
+   - Use routesMaster.isMenuVisible, layoutType, moduleName, sortOrder.
+
+4. API protection rollout:
+   - Start module by module.
+   - Recommended first module: Leads.
+   - Add permission guards to addLead, updateLead, deleteLead.
+   - Add special action guard later for importLeads.
+
+5. DB cleanup later:
+   - Fix /oboarding-lead isPublic NULL.
+   - Review old /oboarding-leads.php route.
+   - Leave canExport columns for now, but keep ignored.
+
+## Extra 20 Minute Update
+
+Files changed after the first handoff:
+
+1. api/getRolePermission.php
+   - Role permission output now groups routes by module name.
+   - Approve is now shown beside View, Add, Edit, and Delete.
+   - Export is still not shown.
+
+2. pages/permission-setup.php
+   - Added small styling for module heading rows.
+   - Save behavior still writes canExport as 0.
+
+Verification:
+
+1. PHP lint passed:
+   - api/getRolePermission.php
+   - pages/permission-setup.php
+
+Next best starting point tomorrow:
+
+1. Build Employee Exceptions UI.
+2. Show Role Default and Custom Permission clearly.
+3. When Custom Permission is OFF, remove the user override row.
+4. When Custom Permission is ON, save the exact row values.
+
+## Final 10 Minute Update
+
+Files changed:
+
+1. pages/permission-setup.php
+   - Added Select Module dropdown beside Select Role.
+   - Module list comes from active, non-public routes in routesMaster.
+   - Loading now sends roleName and moduleName to the permission API.
+
+2. api/getRolePermission.php
+   - Accepts optional moduleName.
+   - Filters routes by selected module with a prepared statement.
+   - Supports Other for blank/null module names.
+   - Saving remains scoped to the routes visible in the loaded form.
+
+Verification:
+
+1. PHP lint passed:
+   - api/getRolePermission.php
+   - pages/permission-setup.php
+
+Tomorrow start here:
+
+1. Open Permission Setup locally and visually check Role + Module loading.
+2. Then begin Employee Exceptions UI.
+3. Keep Employee Exceptions simple:
+   - Role Default shown first.
+   - Custom Permission switch.
+   - OFF deletes override row.
+   - ON saves exact route/action values.

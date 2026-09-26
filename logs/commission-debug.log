@@ -1,0 +1,15 @@
+[2026-05-12 14:56:16] API STARTED
+[2026-05-12 14:56:16] Inputs Loaded | Employee ID: 5
+[2026-05-12 14:56:16] Category Loaded: Performance Bonus
+[2026-05-12 14:56:16] Validation Passed
+[2026-05-12 14:56:16] Attachment Uploaded: 1778577976_icons8-globe-africa-94.png
+[2026-05-12 14:56:16] Checking Duplicate Transaction
+[2026-05-12 14:56:16] Duplicate Validation Passed
+[2026-05-12 14:56:16] Saving Transaction
+[2026-05-12 14:56:16] Transaction Saved Successfully
+[2026-05-12 14:56:16] Inserted Transaction ID: 12
+[2026-05-12 14:56:16] Starting Mail Flow
+[2026-05-12 14:56:16] MAIL FLOW EXCEPTION: Unknown column 'email' in 'SELECT'
+[2026-05-12 14:56:16] FILE: /home/u438562206/domains/modlus.in/public_html/api/saveCommissionTransaction.php
+[2026-05-12 14:56:16] LINE: 442
+[2026-05-12 14:56:16] API COMPLETED SUCCESSFULLY

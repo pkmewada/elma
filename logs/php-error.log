@@ -1,0 +1,32 @@
+[29-Jul-2026 13:34:42 Asia/Kolkata] === sendOnboardingFormToClient called ===
+[29-Jul-2026 13:34:42 Asia/Kolkata] Form ID: 1
+[29-Jul-2026 13:34:42 Asia/Kolkata] User ID: 6
+[29-Jul-2026 13:34:42 Asia/Kolkata] Form data found: Array
+(
+    [id] => 1
+    [clientMasterId] => 1
+    [leadId] => 698
+    [brandLogos] => []
+    [officialEmail] => azmishanaya040@gmail.com
+    [contactPhone] => 08884185291
+    [mediaLinks] => ["https:\/\/modlus.in\/client-onboarding","https:\/\/preview.sprukomarket.com\/html\/bootstrap\/mamix\/dist\/html\/modals_closes.html"]
+    [competitors] => ["AMAZON , PUMA ,ADIDAS"]
+    [selectedServices] => ["socialMedia","youtube","pinterest","twitter","gmb","googleAds","metaAds"]
+    [formStatus] => draft
+    [sentAt] => 
+    [clientViewedAt] => 
+    [clientSubmittedAt] => 
+    [verifiedAt] => 
+    [verifiedBy] => 
+    [createdAt] => 2026-07-29 13:00:23
+    [updatedAt] => 2026-07-29 13:19:29
+    [clientCode] => 000001
+    [fullName] => Praveen Mewada
+    [email] => praveen.mqlus@gmail.com
+    [phone] => 9691541627
+)
+
+[29-Jul-2026 13:34:42 Asia/Kolkata] Generated token: 67875d02da82bbe15520358b5ef76fe3e488b8bc88422ec3c34fd46053e46104
+[29-Jul-2026 13:34:42 Asia/Kolkata] Token saved successfully
+[29-Jul-2026 13:34:42 Asia/Kolkata] Form link: https://modlus.in/client-onboarding-form?token=67875d02da82bbe15520358b5ef76fe3e488b8bc88422ec3c34fd46053e46104
+[29-Jul-2026 13:34:43 Asia/Kolkata] Email send result: TRUE

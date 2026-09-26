@@ -1,0 +1,38 @@
+CREATE TABLE IF NOT EXISTS permissionActions (
+    id INT NOT NULL AUTO_INCREMENT,
+    routeId INT NOT NULL,
+    actionKey VARCHAR(100) NOT NULL,
+    actionLabel VARCHAR(150) NOT NULL,
+    permissionType ENUM('canAdd', 'canEdit', 'canDelete', 'canApprove', 'special') NOT NULL DEFAULT 'special',
+    buttonSelector VARCHAR(255) DEFAULT NULL,
+    apiEndpoint VARCHAR(255) DEFAULT NULL,
+    httpMethod VARCHAR(10) DEFAULT NULL,
+    isActive TINYINT(1) NOT NULL DEFAULT 1,
+    sortOrder INT NOT NULL DEFAULT 0,
+    createdAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updatedAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    UNIQUE KEY uniqueRouteAction (routeId, actionKey)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS roleActionPermissions (
+    id INT NOT NULL AUTO_INCREMENT,
+    roleName VARCHAR(100) NOT NULL,
+    actionId INT NOT NULL,
+    canAccess TINYINT(1) NOT NULL DEFAULT 0,
+    createdAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updatedAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    UNIQUE KEY uniqueRoleAction (roleName, actionId)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS userActionPermissionOverrides (
+    id INT NOT NULL AUTO_INCREMENT,
+    userId INT NOT NULL,
+    actionId INT NOT NULL,
+    canAccess TINYINT(1) NOT NULL DEFAULT 0,
+    createdAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updatedAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    UNIQUE KEY uniqueUserAction (userId, actionId)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
