@@ -1,4 +1,19 @@
 node_modules
-uploads
 vendor
 esbuild.config.js
+
+# Uploaded files are runtime data; only the protective rules are tracked.
+uploads/*
+!uploads/.htaccess
+
+# Secrets and runtime config — never commit. Examples hold placeholders only.
+.env
+.env.*
+!.env.example
+storage/*.json
+!storage/basic-config.example.json
+storage/lead-documents/
+
+# Logs (the deny rule itself is tracked)
+logs/*
+!logs/.htaccess

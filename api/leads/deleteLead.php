@@ -5,6 +5,7 @@ header('Content-Type: application/json');
 
 require_once __DIR__ . '/../../includes/db.php';
 require_once __DIR__ . '/../../includes/leadActivityLogger.php';
+require_once __DIR__ . '/../../includes/leadAccess.php';
 
 
 if (session_status() !== PHP_SESSION_ACTIVE) {
@@ -117,6 +118,10 @@ if ($id <= 0) {
 
 }
 
+// Delete permission on the caller's lead page + lead must be in scope.
+requireLeadPermission('canDelete');
+requireLeadAccess($con, $id);
+
 
 
 /*
@@ -139,10 +144,9 @@ $oldStmt =
             fullName,
             email,
             phone,
-            source,
-            orgName,
-            categoryId,
-            planId,
+            sourceId,
+            projectId,
+            assignedToId,
             status,
             createdAt
 
@@ -268,6 +272,22 @@ mysqli_stmt_close(
 );
 
 
+
+if ($deleted) {
+    // Children without a foreign key (remarks/documents/conversions cascade).
+    foreach (['leadFollowUps', 'leadStatusRemarks'] as $childTable) {
+        $childStmt = mysqli_prepare($con, "DELETE FROM {$childTable} WHERE leadId = ?");
+        mysqli_stmt_bind_param($childStmt, 'i', $id);
+        mysqli_stmt_execute($childStmt);
+        mysqli_stmt_close($childStmt);
+    }
+
+    $leadFileDirectory = getLeadFileDirectory($id);
+    foreach (glob($leadFileDirectory . '/*') ?: [] as $leadFile) {
+        @unlink($leadFile);
+    }
+    @rmdir($leadFileDirectory);
+}
 
 if (!$deleted) {
 

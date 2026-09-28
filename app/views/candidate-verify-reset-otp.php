@@ -28,7 +28,7 @@ $emailValue =
         content="width=device-width, initial-scale=1.0">
 
     <title>
-        Verify Reset OTP - Modlus
+        Verify Reset OTP - <?= htmlspecialchars(BRAND_NAME, ENT_QUOTES, 'UTF-8') ?>
     </title>
 
     <link
@@ -161,7 +161,7 @@ $emailValue =
                         <form
                             method="POST"
                             action=""
-                            id="candidateVerifyOtpForm">
+                            id="candidateVerifyOtpForm"><?php require_once __DIR__ . '/../../includes/Csrf.php'; echo getCsrfInput(); ?>
 
                             <!-- Hidden Fields -->
                             <input
@@ -230,7 +230,7 @@ $emailValue =
                         <form
                             method="POST"
                             action=""
-                            class="text-center mt-4">
+                            class="text-center mt-4"><?php require_once __DIR__ . '/../../includes/Csrf.php'; echo getCsrfInput(); ?>
 
                             <input
                                 type="hidden"

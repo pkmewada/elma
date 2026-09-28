@@ -39,11 +39,11 @@ if (!function_exists('getDbConnection')) {
                     'port' => 3306,
                 ];
 
-            $host = getenv('CRM_DB_HOST') ?: $defaults['host'];
-            $user = getenv('CRM_DB_USER') ?: $defaults['user'];
-            $pass = getenv('CRM_DB_PASS') !== false ? getenv('CRM_DB_PASS') : $defaults['pass'];
-            $db = getenv('CRM_DB_NAME') ?: $defaults['db'];
-            $port = (int)(getenv('CRM_DB_PORT') ?: $defaults['port']);
+            $host = crmEnv('CRM_DB_HOST') ?: $defaults['host'];
+            $user = crmEnv('CRM_DB_USER') ?: $defaults['user'];
+            $pass = crmEnv('CRM_DB_PASS') !== false ? crmEnv('CRM_DB_PASS') : $defaults['pass'];
+            $db = crmEnv('CRM_DB_NAME') ?: $defaults['db'];
+            $port = (int)(crmEnv('CRM_DB_PORT') ?: $defaults['port']);
 
             if ($user === '' || $db === '') {
                 error_log('CRM database is not configured (set CRM_DB_HOST/CRM_DB_USER/CRM_DB_PASS/CRM_DB_NAME).');

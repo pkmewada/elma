@@ -6,6 +6,7 @@ require_once __DIR__ . '/../includes/basic-config.php';
 
 // Designation doubles as the permission role, so suggest the Basic Setup roles.
 $designationRoleOptions = getBasicConfig()['organizationRoles'] ?? [];
+$departmentOptions = getBasicConfig()['departments'] ?? [];
 
 function esc_ed(?string $value): string
 {
@@ -231,6 +232,11 @@ if ($stmt) {
                     <li class="breadcrumb-item"><a href="dashboard">Dashboard</a></li>
                     <li class="breadcrumb-item active" aria-current="page">Employee Directory</li>
                 </ol>
+            </div>
+            <div class="btn-list">
+                <button type="button" class="btn btn-primary btn-wave" data-bs-toggle="modal" data-bs-target="#employeeAddModal">
+                    <i class="ri-user-add-line me-1 align-middle"></i> Add Employee
+                </button>
             </div>
         </div>
 
@@ -688,6 +694,79 @@ if ($stmt) {
     </div>
 </div>
 
+<div class="modal fade" id="employeeAddModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-centered">
+        <div class="modal-content">
+
+            <div class="modal-header">
+                <div>
+                    <h5 class="modal-title mb-0">Add Employee</h5>
+                    <small class="text-muted">CRM login account &middot; role controls access</small>
+                </div>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+
+            <form id="employeeAddForm" class="needs-validation" novalidate>
+                <div class="modal-body">
+                    <div class="row g-3" id="employeeAddFields">
+                        <div class="col-md-6">
+                            <label class="form-label">Full Name <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control" name="fullName" maxlength="150" required>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Email <span class="text-danger">*</span></label>
+                            <input type="email" class="form-control" name="emailAddress" maxlength="150" required>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Mobile Number</label>
+                            <input type="text" class="form-control" name="mobileNumber" maxlength="20">
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Role <span class="text-danger">*</span></label>
+                            <select class="form-select" name="designationName" required>
+                                <option value="">Select role</option>
+                                <?php foreach ($designationRoleOptions as $roleOption): ?>
+                                <option value="<?= esc_ed((string) $roleOption) ?>"><?= esc_ed((string) $roleOption) ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">Department</label>
+                            <select class="form-select" name="departmentName">
+                                <option value="">-</option>
+                                <?php foreach ($departmentOptions as $departmentOption): ?>
+                                <option value="<?= esc_ed((string) $departmentOption) ?>"><?= esc_ed((string) $departmentOption) ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">Employee Code</label>
+                            <input type="text" class="form-control" name="employeeCode" maxlength="30">
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">Joining Date</label>
+                            <input type="date" class="form-control" name="joiningDate">
+                        </div>
+                    </div>
+
+                    <div class="alert alert-success mb-0 d-none" id="employeeAddResult">
+                        <div class="fw-semibold mb-1">Employee account created.</div>
+                        <div>Share these login details once; the employee must set a new password at first login.</div>
+                        <div class="mt-2">Login: <span class="fw-semibold" id="employeeAddResultEmail"></span></div>
+                        <div>Temporary password: <code class="fs-14" id="employeeAddResultPassword"></code></div>
+                    </div>
+                </div>
+
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-light" data-bs-dismiss="modal" id="employeeAddCancelBtn">Cancel</button>
+                    <button type="submit" class="btn btn-primary" id="saveEmployeeAddBtn">Create Account</button>
+                </div>
+            </form>
+
+        </div>
+    </div>
+</div>
+
 <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
 <script src="https://cdn.datatables.net/1.12.1/js/jquery.dataTables.min.js"></script>
 <script src="https://cdn.datatables.net/1.12.1/js/dataTables.bootstrap5.min.js"></script>
@@ -904,7 +983,7 @@ $(function() {
         modal.show();
 
         $.ajax({
-            url: API_BASE + '/onboarding/getEmployeeDetails.php',
+            url: API_BASE + '/employee/getEmployeeDetails.php',
             type: 'GET',
             dataType: 'json',
             data: {
@@ -1159,7 +1238,7 @@ $(function() {
         modal.show();
 
         $.ajax({
-            url: API_BASE + '/onboarding/getEmployeeDetails.php',
+            url: API_BASE + '/employee/getEmployeeDetails.php',
             type: 'GET',
             dataType: 'json',
             data: {
@@ -1222,7 +1301,7 @@ $(function() {
         $btn.prop('disabled', true).text('Saving...');
 
         $.ajax({
-            url: API_BASE + '/onboarding/updateEmployeeDetailsByHr.php',
+            url: API_BASE + '/employee/updateEmployeeDetailsByHr.php',
             type: 'POST',
             dataType: 'json',
             data: formData,
@@ -1258,6 +1337,57 @@ $(function() {
                 $btn.prop('disabled', false).text('Save Employee Details');
             }
         });
+    });
+
+    var employeeAdded = false;
+
+    $(document).on('submit', '#employeeAddForm', function(e) {
+        e.preventDefault();
+
+        var form = this;
+        if (!form.checkValidity()) {
+            form.classList.add('was-validated');
+            return;
+        }
+
+        var $btn = $('#saveEmployeeAddBtn');
+        $btn.prop('disabled', true).text('Creating...');
+
+        $.ajax({
+            url: API_BASE + '/employee/addEmployee.php',
+            type: 'POST',
+            dataType: 'json',
+            headers: { 'X-CSRF-Token': CSRF_TOKEN },
+            data: $(form).serialize(),
+            success: function(res) {
+                if (!res || !res.success) {
+                    window.showToast && window.showToast('danger', (res && res.message) || 'Unable to create employee.');
+                    return;
+                }
+
+                employeeAdded = true;
+                $('#employeeAddFields').addClass('d-none');
+                $('#employeeAddResultEmail').text(res.data.emailAddress);
+                $('#employeeAddResultPassword').text(res.data.tempPassword);
+                $('#employeeAddResult').removeClass('d-none');
+                $btn.addClass('d-none');
+                $('#employeeAddCancelBtn').text('Done');
+                window.showToast && window.showToast('success', res.message);
+            },
+            error: function(xhr) {
+                var message = (xhr.responseJSON && xhr.responseJSON.message) || 'Server error occurred while creating employee.';
+                window.showToast && window.showToast('danger', message);
+            },
+            complete: function() {
+                $btn.prop('disabled', false).text('Create Account');
+            }
+        });
+    });
+
+    $('#employeeAddModal').on('hidden.bs.modal', function() {
+        if (employeeAdded) {
+            location.reload();
+        }
     });
 });
 </script>

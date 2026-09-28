@@ -22,9 +22,9 @@ $hideAppChrome = !empty($hideAppChrome);
     <meta charset="UTF-8">
     <meta name='viewport' content='width=device-width, initial-scale=1.0'>
     <meta http-equiv="X-UA-Compatible" content="IE=edge">
-    <title> MQlus - Premium Admin & Dashboard </title>
+    <title><?= htmlspecialchars(BRAND_NAME, ENT_QUOTES, 'UTF-8') ?> CRM</title>
     <meta name="Description" content="Bootstrap Responsive Admin Web Dashboard HTML5 Template">
-    <meta name="Author" content="Modlus Technologies Private Limited">
+    <meta name="Author" content="<?= htmlspecialchars(BRAND_NAME, ENT_QUOTES, 'UTF-8') ?>">
     <meta name="keywords"
         content="admin dashboard,admin template,admin panel,bootstrap admin dashboard,html template,sales dashboard,dashboard,template dashboard,admin,html and css template,admin dashboard bootstrap,personal dashboard,crypto dashboard,stocks dashboard,admin panel template">
     <!-- Favicon -->
@@ -74,8 +74,9 @@ $hideAppChrome = !empty($hideAppChrome);
         const BASE_URL = "<?= BASE_URL ?>";
         const API_BASE = BASE_URL + '/api';
         const UPLOAD_URL = BASE_URL + '/uploads';
-        const CSRF_TOKEN = "<?= htmlspecialchars(generateCsrfToken(), ENT_QUOTES, 'UTF-8') ?>";
     </script>
+    <?php include __DIR__ . '/csrf-client.php'; ?>
+    <?php include __DIR__ . '/crm-ui.php'; ?>
     <style>
         .table-responsive {
             overflow-x: auto;

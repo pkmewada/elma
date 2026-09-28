@@ -14,9 +14,9 @@ ini_set('display_errors', 1);
     <meta charset="UTF-8">
     <meta name='viewport' content='width=device-width, initial-scale=1.0'>
     <meta http-equiv="X-UA-Compatible" content="IE=edge">
-    <title> Modlus - Premium Admin & Dashboard </title>
+    <title><?= htmlspecialchars(BRAND_NAME, ENT_QUOTES, 'UTF-8') ?> CRM</title>
     <meta name="Description" content="Bootstrap Responsive Admin Web Dashboard HTML5 Template">
-    <meta name="Author" content="Modlus Technologies Private Limited">
+    <meta name="Author" content="<?= htmlspecialchars(BRAND_NAME, ENT_QUOTES, 'UTF-8') ?>">
     <meta name="keywords"
         content="admin dashboard,admin template,admin panel,bootstrap admin dashboard,html template,sales dashboard,dashboard,template dashboard,admin,html and css template,admin dashboard bootstrap,personal dashboard,crypto dashboard,stocks dashboard,admin panel template">
     <!-- Favicon -->
@@ -67,6 +67,8 @@ ini_set('display_errors', 1);
         const API_BASE = BASE_URL + '/api';
         const UPLOAD_URL = BASE_URL + '/uploads';
     </script>
+    <?php include __DIR__ . '/csrf-client.php'; ?>
+    <?php include __DIR__ . '/crm-ui.php'; ?>
 
 </head>
 
@@ -392,7 +394,7 @@ ini_set('display_errors', 1);
                     if (empty($headerProfilePhoto)) {
                     
                         $headerProfilePhoto =
-                            ASSET_URL . '/assets/images/faces/team/7.png';
+                            ASSET_URL . '/assets/images/faces/default-avatar.svg';
                     }
                     
                     ?>

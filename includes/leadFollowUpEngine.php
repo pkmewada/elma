@@ -147,7 +147,7 @@ class LeadFollowUpEngine
      * follow-ups. INSERT IGNORE + the (leadId, settingId) unique key make
      * this safe to call more than once for the same lead.
      */
-    public function generateForLead($leadId, $leadCreatedAt, $actorId)
+    public function generateForLead($leadId, $leadCreatedAt)
     {
         $leadId = (int)$leadId;
         if ($leadId <= 0) {
@@ -163,11 +163,12 @@ class LeadFollowUpEngine
             WHERE isActive = 1"
         );
 
+        // Rule-generated rows are created by the system (not the user who saved the lead).
         $stmt = mysqli_prepare(
             $this->con,
             "INSERT IGNORE INTO leadFollowUps
-            (leadId, settingId, followUpSequence, followUpType, dueDate)
-            VALUES (?, ?, ?, ?, ?)"
+            (leadId, settingId, followUpSequence, followUpType, dueDate, createdByType)
+            VALUES (?, ?, ?, ?, ?, 'system')"
         );
 
         $generated = 0;
@@ -193,7 +194,7 @@ class LeadFollowUpEngine
                 'Lead',
                 $leadId,
                 'FOLLOWUP_GENERATED',
-                "Follow ups scheduled ({$generated})",
+                "Follow ups scheduled from Follow Up Setup rules ({$generated})",
                 null,
                 ['count' => $generated]
             );
@@ -204,70 +205,52 @@ class LeadFollowUpEngine
 
     /*
     |--------------------------------------------------------------------------
-    | Follow Up List
+    | Follow-up views
     |--------------------------------------------------------------------------
+    | today     Pending, due today
+    | upcoming  Pending, due after today
+    | overdue   Pending, due before today
+    | completed Completed (most recent first)
+    | Pending follow-ups of Converted / Lost leads are not actionable and are
+    | left out of the pending views (the rows themselves are kept).
     */
 
+    const VIEWS = ['today', 'upcoming', 'overdue', 'completed'];
+
+    private function viewCondition($view)
+    {
+        switch ($view) {
+            case 'today':
+                return "f.status = 'Pending' AND f.dueDate = CURDATE() AND l.status NOT IN ('converted', 'lost')";
+            case 'upcoming':
+                return "f.status = 'Pending' AND f.dueDate > CURDATE() AND l.status NOT IN ('converted', 'lost')";
+            case 'overdue':
+                return "f.status = 'Pending' AND f.dueDate < CURDATE() AND l.status NOT IN ('converted', 'lost')";
+            case 'completed':
+                return "f.status = 'Completed'";
+        }
+
+        throw new Exception('Invalid follow-up view.');
+    }
+
     /**
-     * $filters: status, dateFrom, dateTo, search, leadStatus, scopeCandidateId
-     * (non-admin users only ever see their own leads' follow-ups -- same
-     * rule api/leads/getScheduledCalls.php already applies).
-     *
-     * leadStatus restricts by leads.status (open/interested/connected/
-     * not_connected -- converted and not_interested leads no longer need
-     * active follow-ups). Defaults to that same restriction when no
-     * specific value is passed, so it always excludes irrelevant leads.
-     *
-     * A Pending row is also excluded when the same lead already has an
-     * open manually-scheduled call (leadRemarks.followUpremark = 'open')
-     * for that exact due date -- the salesperson has already taken over
-     * that occurrence via Schedule Call, so it shouldn't also appear as a
-     * separate actionable generated follow-up. The row itself is never
-     * touched/deleted, only left out of this list.
+     * $filters: view, leadId, search, scopeEmployeeId (0 = all leads; else
+     * only leads assigned to that employee - same rule as the lead APIs).
      */
     public function getFollowUpList($filters = [])
     {
-        $where = ['1=1'];
+        $view = (string)($filters['view'] ?? 'today');
+        $leadId = (int)($filters['leadId'] ?? 0);
+
+        // A single lead's follow-ups: every status, chronological.
+        $where = [$leadId > 0 ? '1=1' : $this->viewCondition($view)];
         $params = [];
         $types = '';
 
-        $status = trim((string)($filters['status'] ?? ''));
-        if ($status !== '' && in_array($status, ['Pending', 'Completed', 'Skipped'], true)) {
-            $where[] = 'f.status = ?';
-            $params[] = $status;
-            $types .= 's';
-        }
-
-        $leadStatuses = ['open', 'interested', 'connected', 'not_connected'];
-        $leadStatus = trim((string)($filters['leadStatus'] ?? ''));
-        if ($leadStatus !== '' && in_array($leadStatus, $leadStatuses, true)) {
-            $where[] = 'l.status = ?';
-            $params[] = $leadStatus;
-            $types .= 's';
-        } else {
-            $where[] = "l.status IN ('open', 'interested', 'connected', 'not_connected')";
-        }
-
-        $where[] = "NOT EXISTS (
-            SELECT 1 FROM leadRemarks sr
-            WHERE sr.leadId = f.leadId
-            AND sr.followUpremark = 'open'
-            AND sr.followUpDateTime IS NOT NULL
-            AND DATE(sr.followUpDateTime) = f.dueDate
-        )";
-
-        $dateFrom = trim((string)($filters['dateFrom'] ?? ''));
-        if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $dateFrom)) {
-            $where[] = 'f.dueDate >= ?';
-            $params[] = $dateFrom;
-            $types .= 's';
-        }
-
-        $dateTo = trim((string)($filters['dateTo'] ?? ''));
-        if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $dateTo)) {
-            $where[] = 'f.dueDate <= ?';
-            $params[] = $dateTo;
-            $types .= 's';
+        if ($leadId > 0) {
+            $where[] = 'f.leadId = ?';
+            $params[] = $leadId;
+            $types .= 'i';
         }
 
         $search = trim((string)($filters['search'] ?? ''));
@@ -279,29 +262,44 @@ class LeadFollowUpEngine
             $types .= 'ss';
         }
 
-        $scopeCandidateId = (int)($filters['scopeCandidateId'] ?? 0);
-        if ($scopeCandidateId > 0) {
-            $where[] = 'l.createdByCandidateId = ?';
-            $params[] = $scopeCandidateId;
+        $scopeEmployeeId = (int)($filters['scopeEmployeeId'] ?? 0);
+        if ($scopeEmployeeId !== 0) {
+            $where[] = 'l.assignedToId = ?';
+            $params[] = $scopeEmployeeId;
             $types .= 'i';
         }
 
+        $order = ($view === 'completed' && $leadId <= 0)
+            ? 'f.resolvedAt DESC, f.id DESC'
+            : 'f.dueDate ASC, f.dueTime ASC, f.id ASC';
+
+        $createdBy = actorNameSql('f.createdByType', 'cua', 'cea');
+        $resolvedBy = actorNameSql('f.resolvedByType', 'rua', 'rea');
+
         $sql = "
             SELECT
-                f.id, f.leadId, f.followUpSequence, f.followUpType, f.dueDate,
-                f.status, f.resolvedAt,
-                l.fullName AS leadName, l.phone, l.source,
-                eu.fullName AS assignedToName
+                f.id, f.leadId, f.followUpSequence, f.followUpType, f.dueDate, f.dueTime,
+                f.status, f.remark, f.resolvedAt, f.settingId,
+                l.fullName AS leadName, l.phone, l.countryCode, l.status AS leadStatus,
+                p.projectName, eu.fullName AS assignedToName,
+                {$createdBy} AS createdByName,
+                IF(f.resolvedAt IS NULL, NULL, {$resolvedBy}) AS completedByName
             FROM leadFollowUps f
             INNER JOIN leads l ON l.id = f.leadId
-            LEFT JOIN employeeusers eu ON eu.id = l.createdByCandidateId
+            LEFT JOIN projects p ON p.id = l.projectId
+            LEFT JOIN employeeusers eu ON eu.id = l.assignedToId
+            LEFT JOIN users cua ON cua.id = f.createdById AND f.createdByType = 'admin'
+            LEFT JOIN employeeusers cea ON cea.id = f.createdById AND f.createdByType = 'employee'
+            LEFT JOIN users rua ON rua.id = f.resolvedByCandidateId AND f.resolvedByType = 'admin'
+            LEFT JOIN employeeusers rea ON rea.id = f.resolvedByCandidateId AND f.resolvedByType = 'employee'
             WHERE " . implode(' AND ', $where) . "
-            ORDER BY f.dueDate ASC, f.followUpSequence ASC
+            ORDER BY {$order}
+            LIMIT 500
         ";
 
         $stmt = mysqli_prepare($this->con, $sql);
         if (!$stmt) {
-            throw new Exception('Failed to load follow ups: ' . mysqli_error($this->con));
+            throw new Exception('Failed to load follow ups.');
         }
 
         if ($types !== '') {
@@ -315,14 +313,35 @@ class LeadFollowUpEngine
         while ($row = mysqli_fetch_assoc($result)) {
             $row['id'] = (int)$row['id'];
             $row['leadId'] = (int)$row['leadId'];
-            $row['followUpSequence'] = (int)$row['followUpSequence'];
-            $row['assignedToName'] = $row['assignedToName'] ?? 'Admin';
+            $row['followUpSequence'] = $row['followUpSequence'] !== null ? (int)$row['followUpSequence'] : null;
+            $row['isManual'] = $row['settingId'] === null;
+            $row['assignedToName'] = $row['assignedToName'] ?? 'Unassigned';
+            unset($row['settingId']);
             $list[] = $row;
         }
 
         mysqli_stmt_close($stmt);
 
         return $list;
+    }
+
+    /** Count per view within the same scope (for the tab badges). */
+    public function getViewCounts($scopeEmployeeId)
+    {
+        $counts = [];
+
+        foreach (self::VIEWS as $view) {
+            $sql = 'SELECT COUNT(*) AS total FROM leadFollowUps f INNER JOIN leads l ON l.id = f.leadId WHERE ' . $this->viewCondition($view);
+
+            if ((int)$scopeEmployeeId !== 0) {
+                $sql .= ' AND l.assignedToId = ' . (int)$scopeEmployeeId;
+            }
+
+            $row = mysqli_fetch_assoc(mysqli_query($this->con, $sql));
+            $counts[$view] = (int)($row['total'] ?? 0);
+        }
+
+        return $counts;
     }
 
     /*
@@ -334,7 +353,7 @@ class LeadFollowUpEngine
     /**
      * @throws Exception on validation failure
      */
-    public function updateStatus($followUpId, $status, $actorId)
+    public function updateStatus($followUpId, $status, $remark = '')
     {
         $followUpId = (int)$followUpId;
         if ($followUpId <= 0 || !in_array($status, ['Completed', 'Skipped'], true)) {
@@ -350,29 +369,38 @@ class LeadFollowUpEngine
             return true;
         }
 
+        $actor = getCurrentActor();
+        $remark = trim((string)$remark);
+        $newRemark = $remark !== ''
+            ? trim(($existing['remark'] ? $existing['remark'] . "\n" : '') . $remark)
+            : $existing['remark'];
+
         $stmt = mysqli_prepare(
             $this->con,
             "UPDATE leadFollowUps
-            SET status = ?, resolvedAt = NOW(), resolvedByCandidateId = ?
+            SET status = ?, remark = ?, resolvedAt = NOW(), resolvedByCandidateId = ?, resolvedByType = ?
             WHERE id = ?"
         );
-        mysqli_stmt_bind_param($stmt, 'sii', $status, $actorId, $followUpId);
+        mysqli_stmt_bind_param($stmt, 'ssisi', $status, $newRemark, $actor['id'], $actor['type'], $followUpId);
 
         if (!mysqli_stmt_execute($stmt)) {
-            $error = mysqli_error($this->con);
             mysqli_stmt_close($stmt);
-            throw new Exception('Failed to update follow up: ' . $error);
+            throw new Exception('Failed to update follow up.');
         }
         mysqli_stmt_close($stmt);
+
+        $label = $existing['followUpSequence'] !== null
+            ? "Follow up #{$existing['followUpSequence']} ({$existing['followUpType']})"
+            : 'Follow up of ' . date('d M Y', strtotime($existing['dueDate']));
 
         saveActivityLog(
             $this->con,
             'Lead',
             (int)$existing['leadId'],
             $status === 'Completed' ? 'FOLLOWUP_COMPLETE' : 'FOLLOWUP_SKIP',
-            "Follow up #{$existing['followUpSequence']} ({$existing['followUpType']}) marked {$status}",
+            "{$label} marked {$status}",
             ['status' => $existing['status']],
-            ['status' => $status]
+            ['status' => $status, 'remark' => $remark !== '' ? $remark : null]
         );
 
         return true;
@@ -383,7 +411,7 @@ class LeadFollowUpEngine
         $id = (int)$id;
         $stmt = mysqli_prepare(
             $this->con,
-            "SELECT id, leadId, followUpSequence, followUpType, status FROM leadFollowUps WHERE id = ?"
+            'SELECT id, leadId, followUpSequence, followUpType, dueDate, status, remark FROM leadFollowUps WHERE id = ?'
         );
         mysqli_stmt_bind_param($stmt, 'i', $id);
         mysqli_stmt_execute($stmt);

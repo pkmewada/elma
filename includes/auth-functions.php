@@ -6,7 +6,7 @@ require_once __DIR__ . '/db.php';
 // local machine with the environment variable CRM_DEV_MODE=1
 // (e.g. `SetEnv CRM_DEV_MODE 1` in the local-only .htaccess).
 if (!defined('DEV_MODE')) {
-    define('DEV_MODE', getenv('CRM_DEV_MODE') === '1');
+    define('DEV_MODE', crmEnv('CRM_DEV_MODE') === '1');
 }
 
 function redirectTo($path)

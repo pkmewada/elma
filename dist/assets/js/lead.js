@@ -1,12 +1,4 @@
 $(function () {
-    
-    window.addEventListener("error", function (e) {
-        console.log("JS ERROR:", e.message, e.filename, e.lineno);
-    });
-
-
-    var leadCategories = [];
-    var leadPlans = [];
 
     // Single source of truth for Country -> ISO2 -> Dial Code, loaded from
     // lead-country-data.js (window.LEAD_COUNTRIES) before this file runs, and
@@ -118,178 +110,281 @@ $(function () {
         setTimeout(autoDetectPhoneCountry, 0);
     });
 
-    loadLeadMasterData();
-
-    var statusColumnIndex = 5;
-    var sourceColumnIndex = 4;
-    var addLeadApiUrl = API_BASE + "/leads/addLead.php";
-    var updateLeadApiUrl = API_BASE + "/leads/updateLead.php";
-    var updateLeadStatusApiUrl = API_BASE + "/leads/updateLeadStatus.php";
-    var deleteLeadApiUrl = API_BASE + "/leads/deleteLead.php";
-    var saveLeadRemarkApiUrl = API_BASE + "/leads/saveLeadRemark.php";
-    var getLeadRemarksApiUrl = API_BASE + "/leads/getLeadRemarks.php";
-    var getScheduledCallsApiUrl = API_BASE + "/leads/getScheduledCalls.php";
-    var getLeadFollowUpsApiUrl = API_BASE + "/leads/getLeadFollowUps.php";
-    var updateLeadFollowUpStatusApiUrl = API_BASE + "/leads/updateLeadFollowUpStatus.php";
-    var uploadLeadDocumentApiUrl = API_BASE + "/leads/uploadLeadDocument.php";
-    var getLeadDocumentsApiUrl = API_BASE + "/leads/getLeadDocuments.php";
-    var importLeadsApiUrl = API_BASE + "/leads/importLeads.php";
-    var getLeadsApiUrl = API_BASE + "/leads/getLeads.php";
-    var leadStatusLabels = {
-        open: "Open",
-        interested: "Interested",
-        connected: "Connected",
-        converted: "Converted",
-        not_interested: "Not Interested",
-        not_connected: "Not Connected",
+    /* ------------------------------------------------------------------
+       Real Estate CRM lead page (admin /leads + employee /emp-leads).
+       Options + permissions come from getLeadMasterData.php; every API
+       re-checks permission, lead scope and CSRF server-side.
+       ------------------------------------------------------------------ */
+    var api = {
+        master: API_BASE + "/leads/getLeadMasterData.php",
+        list: API_BASE + "/leads/getLeads.php",
+        add: API_BASE + "/leads/addLead.php",
+        update: API_BASE + "/leads/updateLead.php",
+        status: API_BASE + "/leads/updateLeadStatus.php",
+        assign: API_BASE + "/leads/assignLead.php",
+        contact: API_BASE + "/leads/logLeadContact.php",
+        remove: API_BASE + "/leads/deleteLead.php",
+        saveRemark: API_BASE + "/leads/saveLeadRemark.php",
+        remarks: API_BASE + "/leads/getLeadRemarks.php",
+        followUps: API_BASE + "/leads/getLeadFollowUps.php",
+        followUpStatus: API_BASE + "/leads/updateLeadFollowUpStatus.php",
+        uploadDoc: API_BASE + "/leads/uploadLeadDocument.php",
+        docs: API_BASE + "/leads/getLeadDocuments.php",
+        importCsv: API_BASE + "/leads/importLeads.php",
     };
 
-    // Some leads have very long free-text names (business listings pasted
-    // as-is); the first column showed the full text unclipped and blew out
-    // the table width. Truncated to 15 characters for display only --
-    // sorting/searching still use the full name, and the full name stays
-    // available via the native title tooltip.
+    var master = { statuses: {}, closingStatuses: ["converted", "lost"], projects: [], sources: [], assignees: [], permissions: {} };
+    var statusColumnIndex = 5;
+    var sourceColumnIndex = 4;
+    var projectColumnIndex = 3;
+
+    function toast(type, message) {
+        if (typeof window.showToast === "function") window.showToast(type, message);
+    }
+
     function escHtml(str) {
         return $("<div>").text(str == null ? "" : String(str)).html();
     }
 
     function truncateChars(text, maxChars) {
         var str = String(text || "");
-        if (str.length <= maxChars) return str;
-        return str.slice(0, maxChars) + "...";
+        return str.length <= maxChars ? str : str.slice(0, maxChars) + "...";
     }
 
     function formatStatusLabel(status) {
-        var rawStatus = $.trim(status || "");
-        if (!rawStatus) return "";
-        if (leadStatusLabels[rawStatus]) return leadStatusLabels[rawStatus];
-        return rawStatus
-            .replace(/_/g, " ")
-            .replace(/\b\w/g, function (letter) {
-                return letter.toUpperCase();
-            });
+        return master.statuses[status] || String(status || "").replace(/_/g, " ");
     }
 
+    function formatDateTime(value) {
+        if (!value) return "";
+        var dateOnly = /^\d{4}-\d{2}-\d{2}$/.test(String(value));
+        var d = new Date(dateOnly ? value + "T00:00:00" : String(value).replace(" ", "T"));
+        if (isNaN(d.getTime())) return value;
+        if (dateOnly) return d.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
+        return d.toLocaleString("en-GB", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", hour12: true });
+    }
+
+    function apiError(xhr, fallback) {
+        return xhr && xhr.responseJSON && xhr.responseJSON.message ? xhr.responseJSON.message : fallback;
+    }
+
+    function waNumber(row) {
+        var code = String(row.countryCode || "+91").replace(/\D/g, "") || "91";
+        return code + String(row.phone || "").replace(/\D/g, "");
+    }
+
+    // ---------- Table ----------
     var table = $("#leads-datatable").DataTable(
         window.ModlusUI.withDataTableDefaults({
             data: [],
             deferRender: true,
-            order: [[7, 'desc']],
+            order: [[7, "desc"]],
             columns: [
-                { data: null, orderable: false, searchable: false, render: (data, type, row, meta) => meta.row + 1 },
-                { data: 'fullName', render: (data, type, row) => {
-                    // The table's global search box searches the string a
-                    // render() returns for type "filter"/"sort" -- it was
-                    // only ever given row.fullName here, so email/phone/
-                    // country (all visibly shown in this same cell) could
-                    // never actually be found by the search box.
-                    if (type !== 'display') {
-                        return [row.fullName, row.email, row.phone, row.country].filter(Boolean).join(' ');
-                    }
-                    return '<span title="' + escHtml(row.fullName) + '">' + escHtml(truncateChars(row.fullName, 15)) + '</span>' +
-                        '<small class="d-block text-muted">' + row.email + '</small>' +
-                        '<small class="d-block text-muted">' + row.phone + '</small>';
+                { data: null, orderable: false, searchable: false, render: function (d, t, r, meta) { return meta.row + 1; } },
+                { data: "fullName", render: function (data, type, row) {
+                    if (type === "export") return [row.fullName, row.phone ? (row.countryCode || "") + " " + row.phone : "", row.email].filter(Boolean).join(" | ");
+                    if (type !== "display") return [row.fullName, row.email, row.phone].filter(Boolean).join(" ");
+                    return '<span title="' + escHtml(row.fullName) + '">' + escHtml(truncateChars(row.fullName, 22)) + "</span>" +
+                        '<small class="d-block text-muted">' + escHtml((row.countryCode || "") + " " + row.phone) + "</small>" +
+                        (row.email ? '<small class="d-block text-muted">' + escHtml(row.email) + "</small>" : "");
                 } },
-                { data: 'employeeName', defaultContent: 'Admin' },
-                { data: null, render: (data, type, row) => {
-                    if (type !== 'display') return (row.categoryName || '') + ' ' + (row.planName || '');
-                    return (row.categoryName ?? '-') +
-                        '<small class="d-block text-muted">' + (row.planName ?? '-') + '</small>';
+                { data: "assignedToName", render: function (data, type) {
+                    if (type !== "display") return data || "Unassigned";
+                    return data ? escHtml(data) : '<span class="text-muted">Unassigned</span>';
                 } },
-                { data: 'source' },
-                { data: 'status', render: (data, type, row) => {
-                    // Same issue as fullName above: without this guard, the
-                    // search box was matching against the FULL status
-                    // dropdown menu markup (every status label, always
-                    // present regardless of the row's actual status), so
-                    // typing any status word matched every row.
-                    if (type !== 'display') return row.status;
+                { data: "projectName", render: function (data, type) {
+                    if (type !== "display") return data || "";
+                    return data ? escHtml(data) : '<span class="text-muted">-</span>';
+                } },
+                { data: "source", render: function (data, type) { return type === "display" ? escHtml(data || "-") : (data || ""); } },
+                { data: "status", render: function (data, type, row) {
+                    if (type === "export") return formatStatusLabel(row.status);
+                    if (type !== "display") return row.status;
                     return getStatusDropdownHtml(row.id, row.status);
                 } },
-                { data: 'orgName', defaultContent: '-', render: (data, type) => {
-                    if (type !== 'display') return data || '-';
-                    return data ? data.replace(/(.{20})/g, '$1<br>') : '-';
+                { data: "nextFollowUp", render: function (data, type) {
+                    if (type === "sort") return data || "9999";
+                    if (type !== "display") return data ? formatDateTime(data) : "";
+                    return data ? escHtml(formatDateTime(data)) : '<span class="text-muted">-</span>';
                 } },
-                { data: 'createdAt', render: data => 
-                    new Date(data).toLocaleString('en-GB', { day:'2-digit', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit', hour12:true })
-                },
-                { data: null, orderable: false, searchable: false, render: (data, type, row) => {
-                    // Legacy leads (no country/countryCode yet) fall back to
-                    // India/+91, same assumption this WhatsApp link always made.
-                    var waCode = (row.countryCode || '+91').replace(/\D/g, '') || '91';
-                    return '<a href="javascript:void(0);" class="btn btn-icon btn-sm btn-warning-light remark-btn" data-id="'+row.id+'" data-name="'+row.fullName+'"><i class="ri-chat-3-line"></i></a> ' +
-                    '<a href="javascript:void(0);" class="btn btn-icon btn-sm btn-info-light edit-lead-btn" data-id="'+row.id+'" data-fullname="'+row.fullName+'" data-email="'+row.email+'" data-phone="'+row.phone+'" data-country="'+(row.country||'')+'" data-countrycode="'+(row.countryCode||'')+'" data-source="'+row.source+'" data-orgname="'+row.orgName+'" data-categoryid="'+row.categoryId+'" data-planid="'+row.planId+'"><i class="ri-edit-line"></i></a> ' +
-                    '<a href="javascript:void(0);" class="btn btn-icon btn-sm btn-secondary-light document-btn" data-id="'+row.id+'" data-name="'+row.fullName+'"><i class="ri-file-pdf-line"></i></a> ' +
-                    '<a href="https://wa.me/'+waCode+row.phone.replace(/\D/g,'')+'?text=Hello%20'+encodeURIComponent(row.fullName)+'" target="_blank" class="btn btn-icon btn-sm btn-success-light"><i class="ri-whatsapp-line"></i></a> ' +
-                    '<a href="javascript:void(0);" class="btn btn-icon btn-sm btn-danger-light delete-lead-btn" data-id="'+row.id+'"><i class="ri-delete-bin-line"></i></a>';
-                } }
+                { data: "createdAt", render: function (data, type) { return type === "sort" ? data : formatDateTime(data); } },
+                { data: null, orderable: false, searchable: false, className: "lead-actions", render: function (data, type, row) {
+                    var p = master.permissions;
+                    var id = row.id;
+                    return '<a href="javascript:void(0);" class="btn btn-icon btn-sm btn-warning-light remark-btn" data-id="' + id + '" title="Remarks & follow-ups"><i class="ri-chat-3-line"></i></a> ' +
+                        (p.canEdit ? '<a href="javascript:void(0);" class="btn btn-icon btn-sm btn-info-light edit-lead-btn" data-id="' + id + '" title="Edit"><i class="ri-edit-line"></i></a> ' : "") +
+                        '<a href="javascript:void(0);" class="btn btn-icon btn-sm btn-secondary-light document-btn" data-id="' + id + '" title="Documents"><i class="ri-file-pdf-line"></i></a> ' +
+                        '<a href="tel:+' + escHtml(waNumber(row)) + '" class="btn btn-icon btn-sm btn-primary-light call-btn" data-id="' + id + '" title="Call"><i class="ri-phone-line"></i></a> ' +
+                        '<a href="https://wa.me/' + escHtml(waNumber(row)) + '?text=' + encodeURIComponent("Hello " + row.fullName) + '" target="_blank" rel="noopener" class="btn btn-icon btn-sm btn-success-light whatsapp-btn" data-id="' + id + '" title="WhatsApp"><i class="ri-whatsapp-line"></i></a> ' +
+                        (p.canAssign ? '<a href="javascript:void(0);" class="btn btn-icon btn-sm btn-purple-light assign-lead-btn" data-id="' + id + '" title="' + (row.assignedToId ? "Reassign" : "Assign") + '"><i class="ri-user-shared-line"></i></a> ' : "") +
+                        (p.canDelete ? '<a href="javascript:void(0);" class="btn btn-icon btn-sm btn-danger-light delete-lead-btn" data-id="' + id + '" title="Delete"><i class="ri-delete-bin-line"></i></a>' : "");
+                } },
             ],
             dom: "t<'row mt-3'<'col-md-5'i><'col-md-7'p>>",
             buttons: [
-                { extend: "csvHtml5", className: "d-none buttons-csv", exportOptions: { columns: [0,1,2,3,4,5,6,7,8] } },
-                { extend: "pdfHtml5", className: "d-none buttons-pdf", exportOptions: { columns: [0,1,2,3,4,5,6,7,8] } }
+                { extend: "csvHtml5", className: "d-none buttons-csv", title: "leads", exportOptions: { columns: [1, 2, 3, 4, 5, 6, 7], orthogonal: "export" } },
+                { extend: "excelHtml5", className: "d-none buttons-excel", title: "leads", exportOptions: { columns: [1, 2, 3, 4, 5, 6, 7], orthogonal: "export" } },
+                { extend: "pdfHtml5", className: "d-none buttons-pdf", title: "Leads", orientation: "landscape", exportOptions: { columns: [1, 2, 3, 4, 5, 6, 7], orthogonal: "export" } },
             ],
-            pageLength: 20
+            pageLength: 20,
         })
     );
 
-    var sourceFilter = $("#sourceFilter");
-    var statusFilter = $("#statusFilter");
-    var employeeFilter = $("#employeeFilter");
-    var dateRangeInput = $("#leadDateRangeFilter");
-    // Picked range as Y-m-d strings (a single picked day = from and to).
-    var dateRange = {
-        from: dateRangeInput.attr("data-date-from") || "",
-        to: dateRangeInput.attr("data-date-to") || "",
-    };
-    var dateRangePicker = null;
-    var statusCards = $("#leadStatusCards");
-    var pendingSourceFilter = "";
-    // Rows of the current Employee/Date scope, before Status/Source narrow
-    // the table -- the status cards are counted from this same set.
-    var scopeRows = [];
-    var leadsRequest = null;
-
-    populateStatusFilter();
-    renderStatusCards();
-
-    // Employee and Date range are server-side (getLeads.php WHERE clause).
-    // Status and Source are client-side DataTables column searches over that
-    // loaded scope, so the status cards can show every status's count for
-    // the same scope the table is showing, even while one status is selected.
-    if (window.leadsFilterPrefill) {
-        if (leadsFilterPrefill.status) {
-            statusFilter.val(leadsFilterPrefill.status);
-        }
-        if (leadsFilterPrefill.source) {
-            pendingSourceFilter = leadsFilterPrefill.source;
-        }
+    function rowById(id) {
+        return table.rows().data().toArray().find(function (r) { return String(r.id) === String(id); }) || null;
     }
 
-    loadLeads();
+    function getStatusDropdownHtml(id, status) {
+        var items = "";
+        $.each(master.statuses, function (key, label) {
+            items += '<li><a class="dropdown-item change-status" href="javascript:void(0);" data-status="' + key + '">' + escHtml(label) + "</a></li>";
+        });
+        var disabled = master.permissions.canEdit ? "" : " disabled";
+        return '<div class="btn-group" data-id="' + id + '">' +
+            '<button type="button" class="btn btn-sm dropdown-toggle lead-status-btn lead-status-' + status + '" data-bs-toggle="dropdown" aria-expanded="false"' + disabled + ">" +
+            escHtml(formatStatusLabel(status)) + "</button>" +
+            '<ul class="dropdown-menu">' + items + "</ul></div>";
+    }
 
-    employeeFilter.on("change", function () {
-        var params = new URLSearchParams();
-        var employeeId = $(this).val();
-        if (employeeId) params.set("employeeId", employeeId);
-        if (statusFilter.val()) params.set("status", statusFilter.val());
-        if (sourceFilter.val()) params.set("source", sourceFilter.val());
-        if (dateRange.from) params.set("dateFrom", dateRange.from);
-        if (dateRange.to) params.set("dateTo", dateRange.to);
+    // ---------- Filters + status cards ----------
+    var sourceFilter = $("#sourceFilter");
+    var statusFilter = $("#statusFilter");
+    var projectFilter = $("#projectFilter");
+    var employeeFilter = $("#employeeFilter");
+    var dateRangeInput = $("#leadDateRangeFilter");
+    var statusCards = $("#leadStatusCards");
+    var dateRange = { from: dateRangeInput.attr("data-date-from") || "", to: dateRangeInput.attr("data-date-to") || "" };
+    var dateRangePicker = null;
+    var scopeRows = [];
+    var leadsRequest = null;
+    var prefill = window.leadsFilterPrefill || {};
 
-        var query = params.toString();
-        window.location.href = window.location.pathname + (query ? "?" + query : "");
+    function fillSelect(selectEl, items, valueKey, labelKey, keepFirst) {
+        selectEl.find(keepFirst ? "option:not(:first)" : "option").remove();
+        items.forEach(function (item) {
+            selectEl.append($("<option>", { value: item[valueKey], text: item[labelKey] }));
+        });
+    }
+
+    function applyMasterData() {
+        var statusItems = $.map(master.statuses, function (label, key) { return { key: key, label: label }; });
+        fillSelect(statusFilter, statusItems, "key", "label", true);
+        fillSelect($("#modal-status"), statusItems, "key", "label", false);
+        fillSelect(sourceFilter, master.sources, "sourceName", "sourceName", true);
+        fillSelect($("#modal-sourceId"), master.sources, "id", "sourceName", true);
+        fillSelect(projectFilter, master.projects, "projectName", "projectName", true);
+        fillSelect($("#modal-projectId"), master.projects, "id", "projectName", true);
+        var assigneeItems = master.assignees.map(function (e) { return { id: e.id, label: e.fullName + " (" + e.role + ")" }; });
+        fillSelect($("#modal-assignedToId"), assigneeItems, "id", "label", true);
+        fillSelect($("#assignEmployeeId"), assigneeItems, "id", "label", true);
+        fillSelect($("#importEmployeeId"), assigneeItems, "id", "label", true);
+        if (employeeFilter.length) {
+            employeeFilter.find("option").slice(2).remove();
+            master.assignees.forEach(function (e) { employeeFilter.append($("<option>", { value: e.id, text: e.fullName })); });
+        }
+        $(".lead-assign-field").toggleClass("d-none", !master.permissions.canAssign);
+
+        if (prefill.status) statusFilter.val(prefill.status);
+        if (prefill.source) sourceFilter.val(prefill.source);
+        if (prefill.employeeId && employeeFilter.length) employeeFilter.val(prefill.employeeId);
+        renderStatusCards();
+    }
+
+    function renderStatusCards() {
+        var cards = [{ status: "", key: "all", label: "All" }];
+        $.each(master.statuses, function (key, label) { cards.push({ status: key, key: key, label: label }); });
+        var html = "";
+        cards.forEach(function (card) {
+            html += '<div class="col"><div class="card custom-card mb-0 lead-status-card" data-status="' + card.status + '" title="Show ' + escHtml(card.label) + ' leads">' +
+                '<div class="card-body p-3"><div class="d-flex align-items-baseline gap-2">' +
+                '<span class="fs-20 fw-semibold" data-status-count="' + card.key + '">—</span>' +
+                '<span class="text-muted fs-12" data-status-percent="' + card.key + '"></span></div>' +
+                '<span class="badge ' + (card.status ? "lead-status-" + card.status : "bg-primary-transparent") + '">' + escHtml(card.label) + "</span>" +
+                "</div></div></div>";
+        });
+        statusCards.html(html);
+    }
+
+    function columnExactSearch(value) {
+        return value ? "^" + $.fn.dataTable.util.escapeRegex(value) + "$" : "";
+    }
+
+    function applyColumnFilters() {
+        table.column(sourceColumnIndex).search(columnExactSearch(sourceFilter.val()), true, false);
+        table.column(projectColumnIndex).search(columnExactSearch(projectFilter.val()), true, false);
+        table.column(statusColumnIndex).search(columnExactSearch(statusFilter.val()), true, false);
+        table.draw();
+        updateStatusCounts();
+    }
+
+    // Cards count the loaded scope + Source/Project filters, not the Status
+    // filter, so every status stays visible while one is selected.
+    function updateStatusCounts() {
+        var source = sourceFilter.val();
+        var project = projectFilter.val();
+        var counts = { all: 0 };
+        scopeRows.forEach(function (row) {
+            if (source && row.source !== source) return;
+            if (project && row.projectName !== project) return;
+            counts[row.status] = (counts[row.status] || 0) + 1;
+            counts.all++;
+        });
+        statusCards.find("[data-status-count]").each(function () { $(this).text(counts[$(this).attr("data-status-count")] || 0); });
+        statusCards.find("[data-status-percent]").each(function () {
+            var count = counts[$(this).attr("data-status-percent")] || 0;
+            $(this).text((counts.all ? Math.round((count / counts.all) * 1000) / 10 : 0) + "%");
+        });
+        statusCards.find(".lead-status-card").each(function () {
+            $(this).toggleClass("active", $(this).attr("data-status") === (statusFilter.val() || ""));
+        });
+    }
+
+    function loadLeads() {
+        var requestData = {};
+        if (dateRange.from) requestData.dateFrom = dateRange.from;
+        if (dateRange.to) requestData.dateTo = dateRange.to;
+        if (employeeFilter.length && employeeFilter.val()) requestData.employeeId = employeeFilter.val();
+        if (leadsRequest) leadsRequest.abort();
+
+        scopeRows = [];
+        table.settings()[0].oLanguage.sEmptyTable = "Loading...";
+        table.clear().draw();
+
+        leadsRequest = $.ajax({ url: api.list, method: "GET", dataType: "json", data: requestData })
+            .done(function (response) {
+                if (!response || !response.success) {
+                    table.settings()[0].oLanguage.sEmptyTable = "Unable to load leads.";
+                    table.clear().draw();
+                    toast("danger", (response && response.message) || "Unable to load leads.");
+                    return;
+                }
+                scopeRows = response.data || [];
+                table.settings()[0].oLanguage.sEmptyTable = "No leads found.";
+                table.clear().rows.add(scopeRows);
+                applyColumnFilters();
+            })
+            .fail(function (xhr, textStatus) {
+                if (textStatus === "abort") return;
+                var message = apiError(xhr, "Unable to load leads.");
+                table.settings()[0].oLanguage.sEmptyTable = message;
+                table.clear().draw();
+                toast("danger", message);
+            });
+    }
+
+    statusCards.on("click", ".lead-status-card", function () {
+        var status = $(this).attr("data-status");
+        statusFilter.val(statusFilter.val() === status ? "" : status);
+        applyColumnFilters();
     });
+    sourceFilter.on("change", applyColumnFilters);
+    projectFilter.on("change", applyColumnFilters);
+    statusFilter.on("change", applyColumnFilters);
+    employeeFilter.on("change", loadLeads);
 
-    // Same flatpickr range-picker pattern as the app's other filter bars
-    // (apply-leave, graphic-content): one input, mode "range". Reloads only
-    // when the picker closes with a different range, not on each click.
     if (dateRangeInput.length && typeof window.flatpickr === "function") {
         dateRangePicker = window.flatpickr(dateRangeInput[0], {
-            mode: "range",
-            dateFormat: "Y-m-d",
-            altInput: true,
-            altFormat: "d M Y",
+            mode: "range", dateFormat: "Y-m-d", altInput: true, altFormat: "d M Y",
             defaultDate: dateRange.from ? [dateRange.from, dateRange.to || dateRange.from] : [],
             onClose: function (selectedDates, _, instance) {
                 var from = selectedDates.length ? instance.formatDate(selectedDates[0], "Y-m-d") : "";
@@ -301,997 +396,357 @@ $(function () {
         });
     }
 
-    // Reset Filters -- clears Status/Source/Date range (and Employee, admin
-    // only) and reloads. Employee is server-side, so if it's active a plain
-    // reload (no query string) is needed to clear the SQL WHERE clause too.
     $("#leadsFilterResetBtn").on("click", function () {
-        if (employeeFilter.length && (employeeFilter.val() || window.location.search)) {
-            window.location.href = window.location.pathname;
-            return;
-        }
-        statusFilter.val("");
-        sourceFilter.val("");
+        statusFilter.val(""); sourceFilter.val(""); projectFilter.val("");
+        if (employeeFilter.length) employeeFilter.val("");
         dateRange = { from: "", to: "" };
         if (dateRangePicker) dateRangePicker.clear();
-        pendingSourceFilter = "";
         loadLeads();
     });
 
-    function loadLeads() {
-        var selectedSource = sourceFilter.val() || pendingSourceFilter || "";
-        var requestData = {};
-
-        if (dateRange.from) requestData.dateFrom = dateRange.from;
-        if (dateRange.to) requestData.dateTo = dateRange.to;
-        if (employeeFilter.length && employeeFilter.val()) {
-            requestData.employeeId = employeeFilter.val();
-        }
-
-        // Drop a still-running request so an older, slower response can't
-        // overwrite the table/cards after the filters changed again.
-        if (leadsRequest) leadsRequest.abort();
-
-        scopeRows = [];
-        statusCards.find("[data-status-count]").text("—");
-        statusCards.find("[data-status-percent]").text("");
-        table.settings()[0].oLanguage.sEmptyTable = "Loading...";
-        table.clear().draw();
-
-        leadsRequest = $.ajax({
-            url: getLeadsApiUrl,
-            method: "GET",
-            dataType: "json",
-            data: requestData,
-        })
-            .done(function (response) {
-                if (!response || !response.success) {
-                    table.settings()[0].oLanguage.sEmptyTable = "Unable to load leads.";
-                    table.clear().draw();
-                    updateStatusCounts();
-                    if (typeof window.showToast === "function") {
-                        window.showToast("danger", response && response.message ? response.message : "Unable to load leads.");
-                    }
-                    return;
-                }
-
-                var rows = Array.isArray(response.data) ? response.data : [];
-                scopeRows = rows;
-                table.settings()[0].oLanguage.sEmptyTable = "No leads found.";
-                table.clear();
-                table.rows.add(rows);
-
-                populateFilter(sourceFilter, sourceColumnIndex);
-                if (selectedSource) {
-                    addOptionIfMissing(sourceFilter, selectedSource, selectedSource);
-                    sourceFilter.val(selectedSource);
-                    pendingSourceFilter = "";
-                }
-                applyColumnFilters();
-            })
-            .fail(function (xhr, textStatus) {
-                if (textStatus === "abort") return;
-                updateStatusCounts();
-                var message = "Unable to load leads.";
-                if (xhr.responseJSON && xhr.responseJSON.message) {
-                    message = xhr.responseJSON.message;
-                }
-                table.settings()[0].oLanguage.sEmptyTable = message;
-                table.clear().draw();
-                if (typeof window.showToast === "function") {
-                    window.showToast("danger", message);
-                }
-            });
-    }
-
-    function populateFilter(selectEl, columnIndex) {
-        selectEl.find('option:not(:first)').remove(); // Clear existing options (keep the first "all" option)
-        var uniqueValues = table.column(columnIndex).data().unique().sort().toArray();
-
-        $.each(uniqueValues, function (_, value) {
-            var cleanedValue = $("<div>").html(value).text().trim();
-            if (cleanedValue !== "") {
-                selectEl.append(
-                    $("<option>", {
-                        value: cleanedValue,
-                        text: cleanedValue,
-                    })
-                );
-            }
-        });
-    }
-
-    function populateStatusFilter() {
-        statusFilter.find("option:not(:first)").remove();
-        $.each(leadStatusLabels, function (status, label) {
-            statusFilter.append(
-                $("<option>", {
-                    value: status,
-                    text: label,
-                })
-            );
-        });
-    }
-
-    function getStatusDropdownHtml(id, status) {
-        var statusLabel = formatStatusLabel(status);
-        return (
-            '<div class="btn-group" data-id="' + id + '">' +
-            '<button type="button" class="btn btn-sm dropdown-toggle lead-status-btn lead-status-' + status + '" data-bs-toggle="dropdown" aria-expanded="false" data-status="' + status + '">' +
-            statusLabel +
-            "</button>" +
-            '<ul class="dropdown-menu">' +
-            '<li><a class="dropdown-item change-status" href="javascript:void(0);" data-status="open">Open</a></li>' +
-            '<li><a class="dropdown-item change-status" href="javascript:void(0);" data-status="interested">Interested</a></li>' +
-            '<li><a class="dropdown-item change-status" href="javascript:void(0);" data-status="connected">Connected</a></li>' +
-            '<li><a class="dropdown-item change-status" href="javascript:void(0);" data-status="converted">Converted</a></li>' +
-            '<li><a class="dropdown-item change-status" href="javascript:void(0);" data-status="not_interested">Not Interested</a></li>' +
-            '<li><a class="dropdown-item change-status" href="javascript:void(0);" data-status="not_connected">Not Connected</a></li>' +
-            "</ul>" +
-            "</div>"
-        );
-    }
-
-    function addOptionIfMissing(selectEl, value, text) {
-        if (!value) return;
-        if (selectEl.find('option[value="' + value.replace(/"/g, '\\"') + '"]').length === 0) {
-            selectEl.append(
-                $("<option>", {
-                    value: value,
-                    text: text || value,
-                })
-            );
-        }
-    }
-
-    function columnExactSearch(value) {
-        return value ? "^" + $.fn.dataTable.util.escapeRegex(value) + "$" : "";
-    }
-
-    function applyColumnFilters() {
-        table.column(sourceColumnIndex).search(columnExactSearch(sourceFilter.val()), true, false);
-        table.column(statusColumnIndex).search(columnExactSearch(statusFilter.val()), true, false);
-        table.draw();
-        updateStatusCounts();
-    }
-
-    // "All" card first (status "" = no Status filter), then one per status.
-    function renderStatusCards() {
-        var cards = [{ status: "", key: "all", label: "All" }];
-        $.each(leadStatusLabels, function (status, label) {
-            cards.push({ status: status, key: status, label: label });
-        });
-
-        var html = "";
-        $.each(cards, function (_, card) {
-            html +=
-                '<div class="col">' +
-                '<div class="card custom-card mb-0 lead-status-card" data-status="' + card.status + '" title="Show ' + escHtml(card.label) + ' leads">' +
-                '<div class="card-body p-3">' +
-                '<div class="d-flex align-items-baseline gap-2">' +
-                '<span class="fs-20 fw-semibold" data-status-count="' + card.key + '">—</span>' +
-                '<span class="text-muted fs-12" data-status-percent="' + card.key + '"></span>' +
-                "</div>" +
-                '<span class="badge ' + (card.status ? "lead-status-" + card.status : "bg-primary-transparent") + '">' + escHtml(card.label) + "</span>" +
-                "</div>" +
-                "</div>" +
-                "</div>";
-        });
-        statusCards.html(html);
-    }
-
-    // Counted from the loaded scope + Source filter, but deliberately NOT the
-    // Status filter -- selecting a status narrows the table while the cards
-    // keep the full breakdown so the user can switch between statuses.
-    // Percentages are against the "All" total of that same scope.
-    function updateStatusCounts() {
-        var source = sourceFilter.val();
-        var counts = { all: 0 };
-        $.each(scopeRows, function (_, row) {
-            if (source && row.source !== source) return;
-            counts[row.status] = (counts[row.status] || 0) + 1;
-            counts.all++;
-        });
-
-        statusCards.find("[data-status-count]").each(function () {
-            $(this).text(counts[$(this).attr("data-status-count")] || 0);
-        });
-        statusCards.find("[data-status-percent]").each(function () {
-            var count = counts[$(this).attr("data-status-percent")] || 0;
-            var percent = counts.all ? Math.round((count / counts.all) * 1000) / 10 : 0;
-            $(this).text(percent + "%");
-        });
-        statusCards.find(".lead-status-card").each(function () {
-            $(this).toggleClass("active", $(this).attr("data-status") === (statusFilter.val() || ""));
-        });
-    }
-
-    statusCards.on("click", ".lead-status-card", function () {
-        var status = $(this).attr("data-status");
-        statusFilter.val(statusFilter.val() === status ? "" : status);
-        applyColumnFilters();
+    $(".export-btn").on("click", function () {
+        var type = $(this).data("type");
+        table.button(".buttons-" + type).trigger();
     });
 
-    sourceFilter.on("change", applyColumnFilters);
+    $("#tableSearch").on("keyup", function () { table.search(this.value).draw(); });
 
-    statusFilter.on("change", applyColumnFilters);
+    table.on("order.dt search.dt draw.dt", function () {
+        var info = table.page.info();
+        table.column(0, { search: "applied", order: "applied", page: "current" }).nodes().each(function (cell, index) {
+            cell.innerHTML = info.start + index + 1;
+        });
+    });
 
+    // ---------- Status ----------
     $(document).on("click", ".change-status", function (event) {
         event.preventDefault();
         var status = $(this).data("status");
-        var parentGroup = $(this).closest(".btn-group");
-        var leadId = parentGroup.data("id");
-
+        var leadId = $(this).closest(".btn-group").data("id");
         if (!leadId || !status) return;
-
-        if (status === "converted" || status === "not_interested") {
-            openLeadStatusModal(leadId, status);
+        if (master.closingStatuses.indexOf(status) !== -1) {
+            $("#statusLeadId").val(leadId);
+            $("#selectedLeadStatus").val(status);
+            $("#selectedStatusText").text(formatStatusLabel(status));
+            $("#statusRemark").val("");
+            $("#leadStatusModalTitle").text(status === "lost" ? "Mark Lead as Lost" : "Mark Lead as Converted");
+            $("#leadStatusModal").modal("show");
             return;
         }
+        saveStatus(leadId, status, "");
+    });
 
-        $.ajax({
-            url: updateLeadStatusApiUrl,
-            method: "POST",
-            contentType: "application/json",
-            dataType: "json",
-            data: JSON.stringify({ id: leadId, status: status }),
-        })
+    $("#saveLeadStatusBtn").on("click", function () {
+        var remark = $.trim($("#statusRemark").val());
+        if (!remark) { toast("warning", "Please enter a remark / reason."); return; }
+        saveStatus($("#statusLeadId").val(), $("#selectedLeadStatus").val(), remark);
+    });
+
+    function saveStatus(leadId, status, remark) {
+        $.ajax({ url: api.status, method: "POST", contentType: "application/json", dataType: "json", data: JSON.stringify({ id: leadId, status: status, remark: remark }) })
             .done(function (res) {
-                if (res && res.success) {
-                    var button = parentGroup.find(".lead-status-btn");
-                    var label = formatStatusLabel(status);
-                    button
-                        .text(label)
-                        .removeClass("lead-status-open lead-status-interested lead-status-connected lead-status-converted lead-status-not_interested lead-status-not_connected")
-                        .addClass("lead-status-btn lead-status-" + status)
-                        .attr("data-status", status);
-                    window.showToast("success", "Status updated");
-                    loadLeads();
-                }
+                if (!res || !res.success) { toast("danger", (res && res.message) || "Status update failed."); return; }
+                $("#leadStatusModal").modal("hide");
+                toast("success", res.message || "Status updated");
+                loadLeads();
             })
-            .fail(function (xhr) {
-                console.log("FAILED", xhr.status, xhr.responseText);
-            });
-    });
+            .fail(function (xhr) { toast("danger", apiError(xhr, "Status update failed.")); });
+    }
 
-    $("#leads-datatable_wrapper .dataTables_length select").addClass("form-select form-select-sm");
-
-    $(".export-btn").on("click", function () {
-        var type = $(this).data("type");
-        if (type === "csv") table.button(".buttons-csv").trigger();
-        if (type === "pdf") table.button(".buttons-pdf").trigger();
-    });
-
-    $("#tableSearch").on("keyup", function () {
-        table.search(this.value).draw();
-    });
-
-    table
-        .on("order.dt search.dt draw.dt", function () {
-            var info = table.page.info();
-            table.column(0, { search: "applied", order: "applied", page: "current" })
-                .nodes()
-                .each(function (cell, index) {
-                    cell.innerHTML = info.start + index + 1;
-                });
-        })
-        .draw();
-
-    // ---------- Add / Edit Lead Form ----------
+    // ---------- Add / Edit ----------
     var addLeadForm = $("#addLeadForm");
     var submitButton = $("#addLeadSubmitBtn");
-    var submitSpinner = $("#addLeadSubmitSpinner");
-    var submitText = $("#addLeadSubmitText");
 
     addLeadForm.on("submit", function (event) {
         event.preventDefault();
         event.stopPropagation();
         var formEl = this;
-
-        // Normalize a pasted "+<code><number>" that never lost focus (e.g.
-        // paste then hit Enter) before running native validation on it.
         autoDetectPhoneCountry();
-
         formEl.classList.add("was-validated");
-
-        if (!formEl.checkValidity()) {
-            if (typeof window.showToast === "function") window.showToast("warning", "Please fill all required fields");
-            return;
-        }
+        if (!formEl.checkValidity()) { toast("warning", "Please fill all required fields"); return; }
 
         var isEdit = $("#leadId").val() !== "";
-        var apiUrl = isEdit ? updateLeadApiUrl : addLeadApiUrl;
-        var successMessage = isEdit ? "Lead updated successfully" : "Lead added successfully";
-        var failMessage = isEdit ? "Failed to update lead" : "Failed to add lead";
-
+        var status = $("#modal-status").val();
         var payload = {
             fullName: $.trim($("#modal-fullName").val()),
             email: $.trim($("#modal-email").val()),
             phone: $.trim($("#modal-phone").val()),
             country: $.trim($("#modal-country").val()),
             countryCode: $.trim($("#modal-countryCode").val()),
-            source: $.trim($("#modal-source").val()),
-            orgName: $.trim($("#modal-orgName").val()),
-            categoryId: parseInt($("#modal-categoryId").val() || 0),
-            planId: parseInt($("#modal-planId").val() || 0),
+            projectId: parseInt($("#modal-projectId").val() || 0, 10),
+            sourceId: parseInt($("#modal-sourceId").val() || 0, 10),
         };
-        if (isEdit) payload.id = $("#leadId").val();
+        if (isEdit) {
+            payload.id = $("#leadId").val();
+        } else {
+            payload.status = status;
+            payload.assignedToId = parseInt($("#modal-assignedToId").val() || 0, 10);
+            payload.nextFollowUp = $("#modal-nextFollowUp").val();
+            payload.remark = $.trim($("#modal-remark").val());
+            if (master.closingStatuses.indexOf(status) !== -1 && !payload.remark) {
+                toast("warning", "A remark / reason is required for " + formatStatusLabel(status) + " leads.");
+                return;
+            }
+        }
 
         submitButton.prop("disabled", true);
-        submitSpinner.removeClass("d-none");
-        submitText.text(isEdit ? "Updating..." : "Saving...");
-
-        $.ajax({
-            url: apiUrl,
-            method: "POST",
-            contentType: "application/json",
-            dataType: "json",
-            data: JSON.stringify(payload),
-        })
+        $("#addLeadSubmitSpinner").removeClass("d-none");
+        $.ajax({ url: isEdit ? api.update : api.add, method: "POST", contentType: "application/json", dataType: "json", data: JSON.stringify(payload) })
             .done(function (response) {
-                if (response && response.success) {
-                    var lead = response.data || {};
-                    var leadId = lead.id || payload.id || 0;
-                    var statusValue = lead.status || "open";
-                    var createdDate = lead.createdDate || "";
-
-                    if (isEdit) {
-                        var row = table.row(function (idx, data, node) {
-                            return $(node).find(".edit-lead-btn").data("id") == leadId;
-                        });
-                        if (row.any()) {
-                            var currentData = row.data();
-                            var updatedRowData = {
-                                ...currentData,
-                                id: leadId,
-                                fullName: lead.fullName || payload.fullName,
-                                email: lead.email || payload.email,
-                                phone: lead.phone || payload.phone,
-                                country: lead.country || payload.country,
-                                countryCode: lead.countryCode || payload.countryCode,
-                                source: lead.source || payload.source,
-                                orgName: lead.orgName || payload.orgName,
-                                categoryId: lead.categoryId || payload.categoryId,
-                                planId: lead.planId || payload.planId,
-                                status: statusValue,
-                                employeeName: lead.employeeName || currentData.employeeName || '',
-                                categoryName: lead.categoryName || currentData.categoryName || '',
-                                planName: lead.planName || currentData.planName || ''
-                            };
-                            row.data(updatedRowData).draw(false);
-                        }
-                    } else {
-                        var newLeadObject = {
-                            id: leadId,
-                            fullName: lead.fullName || payload.fullName,
-                            email: lead.email || payload.email,
-                            phone: lead.phone || payload.phone,
-                            country: lead.country || payload.country,
-                            countryCode: lead.countryCode || payload.countryCode,
-                            source: lead.source || payload.source,
-                            orgName: lead.orgName || payload.orgName || '-',
-                            categoryId: lead.categoryId || payload.categoryId || 0,
-                            planId: lead.planId || payload.planId || 0,
-                            status: statusValue,
-                            createdAt: createdDate,
-                            employeeName: lead.employeeName || '',
-                            categoryName: lead.categoryName || '',
-                            planName: lead.planName || ''
-                        };
-                        table.row.add(newLeadObject).draw(false);
-                    }
-
-                    addOptionIfMissing(sourceFilter, lead.source || payload.source, lead.orgName || payload.orgName);
-                    addOptionIfMissing(statusFilter, statusValue, formatStatusLabel(statusValue));
-
-                    formEl.reset();
-                    formEl.classList.remove("was-validated");
-                    $("#addLeadModal").modal("hide");
-                    loadLeads();
-                    if (typeof window.showToast === "function") window.showToast("success", response.message || successMessage);
-                } else {
-                    if (typeof window.showToast === "function") window.showToast("danger", response && response.message ? response.message : failMessage);
-                }
+                if (!response || !response.success) { toast("danger", (response && response.message) || "Failed to save lead"); return; }
+                formEl.reset();
+                formEl.classList.remove("was-validated");
+                $("#addLeadModal").modal("hide");
+                toast("success", response.message || "Lead saved");
+                loadLeads();
             })
-            .fail(function (xhr) {
-                var message = failMessage;
-                if (xhr.responseJSON && xhr.responseJSON.message) message = xhr.responseJSON.message;
-                if (typeof window.showToast === "function") window.showToast("danger", message);
-            })
+            .fail(function (xhr) { toast("danger", apiError(xhr, "Failed to save lead")); })
             .always(function () {
                 submitButton.prop("disabled", false);
-                submitSpinner.addClass("d-none");
-                submitText.text(isEdit ? "Update Lead" : "Save Lead");
+                $("#addLeadSubmitSpinner").addClass("d-none");
             });
     });
 
-    // Edit Lead button
     $("#leads-datatable").on("click", ".edit-lead-btn", function () {
-        var btn = $(this);
-        $("#leadId").val(btn.data("id"));
-        $("#modal-fullName").val(btn.data("fullname"));
-        $("#modal-email").val(btn.data("email"));
-        setLeadCountryField(btn.data("country") || "");
-        $("#modal-phone").val(btn.data("phone"));
-        $("#modal-source").val(btn.data("source"));
-        $("#modal-orgName").val(btn.data("orgname"));
-        $("#modal-categoryId").val(btn.data("categoryid")).trigger("change");
-        setTimeout(function () {
-            $("#modal-planId").val(btn.data("planid"));
-        }, 100);
+        var row = rowById($(this).data("id"));
+        if (!row) return;
+        $("#leadId").val(row.id);
+        $("#modal-fullName").val(row.fullName);
+        $("#modal-email").val(row.email || "");
+        setLeadCountryField(row.country || "");
+        $("#modal-phone").val(row.phone);
+        if (row.projectId && !$("#modal-projectId option[value='" + row.projectId + "']").length) {
+            $("#modal-projectId").append($("<option>", { value: row.projectId, text: row.projectName + " (inactive)" }));
+        }
+        $("#modal-projectId").val(row.projectId || "");
+        $("#modal-sourceId").val(row.sourceId || "");
+        $(".lead-create-only").addClass("d-none");
         $("#addLeadModalLabel").text("Edit Lead");
         $("#addLeadSubmitText").text("Update Lead");
         $("#addLeadModal").modal("show");
     });
 
-    // Delete Lead
-    $("#leads-datatable").on("click", ".delete-lead-btn", function () {
-        var id = $(this).data("id");
-        var modal = $("#deleteConfirmModal");
-        var effect = modal.data("bs-effect");
-        if (effect) modal.addClass(effect);
-        modal.data("deleteId", id).modal("show");
-    });
-
-    $("#deleteConfirmModal").on("hidden.bs.modal", function () {
-        var modal = $(this);
-        var effect = modal.data("bs-effect");
-        if (effect) modal.removeClass(effect);
-    });
-
     $("#addLeadModal").on("show.bs.modal", function () {
-        var modal = $(this);
-        var effect = modal.data("bs-effect");
-        if (effect) modal.addClass(effect);
         if ($("#leadId").val() === "") {
-            $("#addLeadForm")[0].reset();
-            $("#addLeadForm")[0].classList.remove("was-validated");
+            addLeadForm[0].reset();
+            addLeadForm[0].classList.remove("was-validated");
             setLeadCountryField("");
+            $("#modal-status").val("new");
+            $(".lead-create-only").removeClass("d-none");
+            $(".lead-assign-field").toggleClass("d-none", !master.permissions.canAssign);
             $("#addLeadModalLabel").text("Add Lead");
             $("#addLeadSubmitText").text("Save Lead");
         }
     });
 
-    $("#addLeadModal").on("hidden.bs.modal", function () {
-        var modal = $(this);
-        var effect = modal.data("bs-effect");
-        if (effect) modal.removeClass(effect);
-        $("#leadId").val("");
+    $("#addLeadModal").on("hidden.bs.modal", function () { $("#leadId").val(""); });
+
+    // ---------- Assign / Reassign ----------
+    $("#leads-datatable").on("click", ".assign-lead-btn", function () {
+        var row = rowById($(this).data("id"));
+        if (!row) return;
+        $("#assignLeadId").val(row.id);
+        $("#assignLeadName").text(row.fullName);
+        $("#assignCurrentName").text(row.assignedToName || "Unassigned");
+        $("#assignEmployeeId").val(row.assignedToId || 0);
+        $("#assignLeadModal").modal("show");
+    });
+
+    $("#saveAssignLeadBtn").on("click", function () {
+        $.ajax({ url: api.assign, method: "POST", dataType: "json", data: { leadId: $("#assignLeadId").val(), employeeId: $("#assignEmployeeId").val() || 0 } })
+            .done(function (res) {
+                if (!res || !res.success) { toast("danger", (res && res.message) || "Assignment failed."); return; }
+                $("#assignLeadModal").modal("hide");
+                toast("success", res.message || "Lead assigned");
+                loadLeads();
+            })
+            .fail(function (xhr) { toast("danger", apiError(xhr, "Assignment failed.")); });
+    });
+
+    // ---------- Delete ----------
+    $("#leads-datatable").on("click", ".delete-lead-btn", function () {
+        $("#deleteConfirmModal").data("deleteId", $(this).data("id")).modal("show");
     });
 
     $("#confirmDeleteBtn").on("click", function () {
         var id = $("#deleteConfirmModal").data("deleteId");
         $("#deleteConfirmModal").modal("hide");
-        $.ajax({
-            url: deleteLeadApiUrl,
-            method: "POST",
-            contentType: "application/json",
-            dataType: "json",
-            data: JSON.stringify({ id: id }),
-        })
+        $.ajax({ url: api.remove, method: "POST", contentType: "application/json", dataType: "json", data: JSON.stringify({ id: id }) })
             .done(function (response) {
-                if (response && response.success) {
-                    var tr = $('.delete-lead-btn[data-id="' + id + '"]').closest("tr");
-                    table.row(tr).remove().draw(false);
-                    if (typeof window.showToast === "function") window.showToast("success", response.message || "Lead deleted successfully");
-                } else {
-                    if (typeof window.showToast === "function") window.showToast("danger", response && response.message ? response.message : "Failed to delete lead");
-                }
+                if (!response || !response.success) { toast("danger", (response && response.message) || "Failed to delete lead"); return; }
+                toast("success", response.message || "Lead deleted successfully");
+                loadLeads();
             })
-            .fail(function (xhr) {
-                var message = "Failed to delete lead";
-                if (xhr.responseJSON && xhr.responseJSON.message) message = xhr.responseJSON.message;
-                if (typeof window.showToast === "function") window.showToast("danger", message);
-            });
+            .fail(function (xhr) { toast("danger", apiError(xhr, "Failed to delete lead")); });
     });
 
-    // Remarks
-    $("#leads-datatable").on("click", ".remark-btn", function () {
-        var leadId = $(this).data("id");
-        var leadName = $(this).data("name");
+    // ---------- Call / WhatsApp (log that the action was opened) ----------
+    $("#leads-datatable").on("click", ".call-btn, .whatsapp-btn", function () {
+        var channel = $(this).hasClass("call-btn") ? "call" : "whatsapp";
+        $.ajax({ url: api.contact, method: "POST", dataType: "json", data: { leadId: $(this).data("id"), channel: channel } });
+    });
+
+    // ---------- Remarks + follow-ups ----------
+    function openRemarks(leadId, leadName) {
         $("#remarkLeadId").val(leadId);
-        $("#remarkLeadName").text(leadName);
+        $("#remarkLeadName").text(leadName || "");
         $("#leadRemark").val("");
+        $("#followUpDateTime").val("");
         loadLeadRemarks(leadId);
+        loadLeadFollowUps(leadId);
         $("#leadRemarkModal").modal("show");
+    }
+
+    $("#leads-datatable").on("click", ".remark-btn", function () {
+        var row = rowById($(this).data("id"));
+        openRemarks($(this).data("id"), row ? row.fullName : "");
     });
 
     function loadLeadRemarks(leadId) {
-        $.getJSON(getLeadRemarksApiUrl, { leadId: leadId }, function (response) {
-            let html = "";
-            if (response.success && response.data.length) {
-                response.data.forEach(function (item) {
-                    html += `
-                        <div class="border rounded p-3 mb-2">
-                            <div class="small text-muted">${item.createdAt}</div>
-                            <div class="mt-2">${item.remark}</div>
-                            ${item.followUpDateTime ? `<div class="text-primary mt-2">Follow Up : ${item.followUpDateTime}</div>` : ""}
-                            <div class="small text-muted mt-2">By ${item.employeeName}</div>
-                        </div>`;
-                });
-            }
-            $("#remarkTimeline").html(html);
-        });
-    }
-
-    $(document).on("click", "#saveRemarkBtn", function () {
-        $.ajax({
-            url: saveLeadRemarkApiUrl,
-            type: "POST",
-            dataType: "json",
-            data: {
-                leadId: $("#remarkLeadId").val(),
-                remark: $("#leadRemark").val(),
-                followUpDateTime: $("#followUpDateTime").val(),
-            },
-            success: function (response) {
-                if (response.success) {
-                    $("#leadRemark").val("");
-                    loadLeadRemarks($("#remarkLeadId").val());
-                    window.showToast("success", "Remark saved");
-                }
-            },
-        });
-    });
-
-    // Master data
-    function loadLeadMasterData() {
-        $.getJSON(API_BASE + "/leads/getLeadMasterData.php", function (response) {
-            if (!response.success) return;
-            leadCategories = response.data.categories || [];
-            leadPlans = response.data.plans || [];
-            populateCategoryDropdown();
-        });
-    }
-
-    function populateCategoryDropdown() {
-        let html = '<option value="">Select Category</option>';
-        leadCategories.forEach(function (cat) {
-            html += `<option value="${cat.id}">${cat.categoryName}</option>`;
-        });
-        $("#modal-categoryId").html(html);
-    }
-
-    $(document).on("change", "#modal-categoryId", function () {
-        let categoryId = $(this).val();
-        let html = '<option value="">Select Plan</option>';
-        leadPlans.forEach(function (plan) {
-            if (String(plan.categoryId) === String(categoryId)) {
-                html += `<option value="${plan.id}">${plan.planName}</option>`;
-            }
-        });
-        $("#modal-planId").html(html);
-    });
-
-    // Scheduled Calls
-    $(document).on("click", "#scheduledCallsBtn", function () {
-        var today = new Date().toISOString().split("T")[0];
-        $("#scheduledCallsDate").val(today);
-        loadScheduledCalls(today);
-        $("#scheduledCallsModal").modal("show");
-    });
-
-    $(document).on("change", "#scheduledCallsDate", function () {
-        loadScheduledCalls($(this).val());
-    });
-
-    function loadScheduledCalls(date) {
-        $.ajax({
-            url: getScheduledCallsApiUrl,
-            type: "GET",
-            dataType: "json",
-            data: { date: date },
-            success: function (response) {
-                var html = "";
-                if (!response.success || !response.data.length) {
-                    html = `<tr><td colspan="7" class="text-center text-muted py-4">No follow-ups scheduled for this date.</td></tr>`;
-                    $("#scheduledCallsTableBody").html(html);
-                    return;
-                }
-                response.data.forEach(function (item, index) {
-                    html += `
-                        <tr>
-                            <td>${index + 1}</td>
-                            <td>${item.followUpTime}</td>
-                            <td>${item.leadName}</td>
-                            <td>${item.phone}</td>
-                            <td>${item.employeeName}</td>
-                            <td>
-                                <select class="form-select form-select-sm followup-status" style="min-width:110px;" data-id="${item.leadId}">
-                                    <option value="open" ${item.status.toLowerCase() === "open" ? "selected" : ""}>Open</option>
-                                    <option value="close" ${item.status.toLowerCase() === "close" ? "selected" : ""}>Close</option>
-                                </select>
-                            </td>
-                            <td>${item.remark}</td>
-                        </tr>`;
-                });
-                $("#scheduledCallsTableBody").html(html);
-            },
-        });
-    }
-
-    // Follow Ups (leadFollowUps, generated by LeadFollowUpEngine from Follow
-    // Up Setup rules). Date-wise by dueDate -- a lead can show multiple rows,
-    // one per generated occurrence. Replaces the separate Follow Up List page.
-    function fmtFollowUpDate(dateStr) {
-        var d = new Date(dateStr + "T00:00:00");
-        if (isNaN(d.getTime())) return dateStr;
-        return d.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
-    }
-
-    function resetFollowUpFilters() {
-        var today = new Date().toISOString().split("T")[0];
-        $("#lfuDateFrom").val(today);
-        $("#lfuDateTo").val(today);
-        $("#lfuLeadStatus").val("");
-    }
-
-    $(document).on("click", "#leadFollowUpsBtn", function () {
-        resetFollowUpFilters();
-        loadFollowUps();
-        $("#leadFollowUpsModal").modal("show");
-    });
-
-    $(document).on("change", "#lfuDateFrom, #lfuDateTo, #lfuLeadStatus", loadFollowUps);
-
-    $(document).on("click", "#lfuResetBtn", function () {
-        resetFollowUpFilters();
-        loadFollowUps();
-    });
-
-    function loadFollowUps() {
-        $("#leadFollowUpsTableBody").html('<tr><td colspan="5" class="text-center text-muted py-3">Loading...</td></tr>');
-
-        $.getJSON(getLeadFollowUpsApiUrl, {
-            status: "Pending",
-            dateFrom: $("#lfuDateFrom").val(),
-            dateTo: $("#lfuDateTo").val(),
-            leadStatus: $("#lfuLeadStatus").val(),
-        }, function (response) {
-            if (!response.success || !response.data.length) {
-                $("#leadFollowUpsTableBody").html(
-                    '<tr><td colspan="5" class="text-center text-muted py-3">No follow ups match the current filters.</td></tr>'
-                );
-                return;
-            }
-
+        $.getJSON(api.remarks, { leadId: leadId }, function (response) {
             var html = "";
-            response.data.forEach(function (row) {
-                html += "<tr>" +
-                    "<td>" + fmtFollowUpDate(row.dueDate) + "</td>" +
-                    "<td>" + escHtml(row.leadName) + '<small class="d-block text-muted">' + escHtml(row.phone) + "</small></td>" +
-                    "<td>Day " + row.followUpSequence + " &middot; " + escHtml(row.followUpType) + "</td>" +
-                    '<td><span class="btn btn-sm btn-outline-warning">' + escHtml(row.status) + "</span></td>" +
-                    "<td>" +
-                        '<button type="button" class="btn btn-sm btn-outline-success mark-followup-btn" data-id="' + row.id + '" data-status="Completed" title="Mark Complete"><i class="ri-check-line"></i></button> ' +
-                        '<button type="button" class="btn btn-sm btn-outline-secondary mark-followup-btn" data-id="' + row.id + '" data-status="Skipped" title="Skip"><i class="ri-close-line"></i></button> ' +
-                        '<button type="button" class="btn btn-sm btn-outline-primary followup-note-btn" data-id="' + row.leadId + '" data-name="' + escHtml(row.leadName) + '" title="Add Note"><i class="ri-sticky-note-line"></i></button>' +
-                    "</td>" +
-                "</tr>";
+            (response.success ? response.data : []).forEach(function (item) {
+                html += '<div class="border rounded p-3 mb-2">' +
+                    '<div class="small text-muted">' + escHtml(item.createdAt) + " &middot; " + escHtml(item.employeeName) + "</div>" +
+                    (item.status ? '<span class="badge bg-light text-dark mt-1">' + escHtml(item.status) + "</span>" : "") +
+                    '<div class="mt-2">' + escHtml(item.remark) + "</div></div>";
             });
-            $("#leadFollowUpsTableBody").html(html);
+            $("#remarkTimeline").html(html || '<div class="text-muted small">No remarks yet.</div>');
         });
     }
 
-    $(document).on("click", ".mark-followup-btn", function () {
-        var id = $(this).data("id");
-        var status = $(this).data("status");
-        if (!confirm((status === "Completed" ? "Mark this follow up as completed?" : "Skip this follow up?"))) return;
-
-        $.ajax({
-            url: updateLeadFollowUpStatusApiUrl,
-            type: "POST",
-            contentType: "application/json",
-            dataType: "json",
-            data: JSON.stringify({ id: id, status: status }),
-        }).done(function (response) {
-            if (response.success) {
-                showToast("success", response.message || "Follow up updated.");
-                loadFollowUps();
-            } else {
-                showToast("error", response.message || "Failed to update follow up.");
-            }
-        }).fail(function () {
-            showToast("error", "Failed to update follow up.");
+    function loadLeadFollowUps(leadId) {
+        $.getJSON(api.followUps, { leadId: leadId }, function (response) {
+            var html = "";
+            (response.success ? response.data : []).forEach(function (f) {
+                var when = formatDateTime(f.dueTime ? f.dueDate + " " + f.dueTime : f.dueDate);
+                var pending = f.status === "Pending";
+                html += '<div class="d-flex justify-content-between align-items-center border rounded p-2 mb-2">' +
+                    "<div><span class=\"fw-semibold\">" + escHtml(when) + "</span> " +
+                    '<span class="badge ' + (pending ? "bg-warning-transparent" : "bg-success-transparent") + '">' + escHtml(f.status) + "</span>" +
+                    (f.remark ? '<div class="small text-muted">' + escHtml(f.remark) + "</div>" : "") + "</div>" +
+                    (pending && master.permissions.canEdit ? '<button type="button" class="btn btn-sm btn-outline-success mark-followup-btn" data-id="' + f.id + '" data-lead="' + f.leadId + '">Complete</button>' : "") +
+                    "</div>";
+            });
+            $("#leadFollowUpList").html(html || '<div class="text-muted small">No follow-ups scheduled.</div>');
         });
+    }
+
+    $("#saveRemarkBtn").on("click", function () {
+        var leadId = $("#remarkLeadId").val();
+        $.ajax({ url: api.saveRemark, type: "POST", dataType: "json", data: { leadId: leadId, remark: $.trim($("#leadRemark").val()), followUpDateTime: $("#followUpDateTime").val() } })
+            .done(function (response) {
+                if (!response || !response.success) { toast("danger", (response && response.message) || "Unable to save."); return; }
+                $("#leadRemark").val("");
+                $("#followUpDateTime").val("");
+                loadLeadRemarks(leadId);
+                loadLeadFollowUps(leadId);
+                toast("success", response.message || "Remark saved");
+                loadLeads();
+            })
+            .fail(function (xhr) { toast("danger", apiError(xhr, "Unable to save.")); });
     });
 
-    $(document).on("click", ".followup-note-btn", function () {
-        $("#remarkLeadId").val($(this).data("id"));
-        $("#remarkLeadName").text($(this).data("name"));
-        $("#leadRemark").val("");
-        loadLeadRemarks($(this).data("id"));
-        $("#leadFollowUpsModal").modal("hide");
-        $("#leadRemarkModal").modal("show");
+    $(document).on("click", "#leadFollowUpList .mark-followup-btn", function () {
+        var leadId = $(this).data("lead");
+        $.ajax({ url: api.followUpStatus, type: "POST", contentType: "application/json", dataType: "json", data: JSON.stringify({ id: $(this).data("id"), status: "Completed" }) })
+            .done(function (response) {
+                if (!response || !response.success) { toast("danger", (response && response.message) || "Failed to update follow up."); return; }
+                toast("success", response.message || "Follow up completed.");
+                loadLeadFollowUps(leadId);
+                loadLeads();
+            })
+            .fail(function (xhr) { toast("danger", apiError(xhr, "Failed to update follow up.")); });
     });
 
-    // Documents
-    $(document).on("click", ".document-btn", function () {
-        var leadId = $(this).data("id");
-        var leadName = $(this).data("name");
-        $("#documentLeadId").val(leadId);
-        $("#documentLeadName").text(leadName);
+    // ---------- Documents ----------
+    $("#leads-datatable").on("click", ".document-btn", function () {
+        var row = rowById($(this).data("id"));
+        $("#documentLeadId").val($(this).data("id"));
+        $("#documentLeadName").text(row ? row.fullName : "");
         $("#leadDocumentFile").val("");
-        loadLeadDocuments(leadId);
+        loadLeadDocuments($(this).data("id"));
         $("#leadDocumentsModal").modal("show");
     });
 
     function loadLeadDocuments(leadId) {
-        $.ajax({
-            url: getLeadDocumentsApiUrl,
-            type: "GET",
-            dataType: "json",
-            data: { leadId: leadId },
-            success: function (response) {
-                var html = "";
-                if (!response.success || !response.data.length) {
-                    html = `<div class="text-center text-muted py-4">No documents uploaded.</div>`;
-                    $("#leadDocumentsContainer").html(html);
-                    return;
-                }
-                response.data.forEach(function (doc) {
-                    html += `
-                        <div class="border rounded p-3 mb-3">
-                            <div class="d-flex justify-content-between align-items-start">
-                                <div>
-                                    <div class="fw-semibold"><i class="ri-file-pdf-line text-danger me-1"></i>${doc.fileName}</div>
-                                    <div class="small text-muted mt-1">Uploaded By : ${doc.employeeName}</div>
-                                    <div class="small text-muted">${doc.uploadedAt}</div>
-                                </div>
-                                <div>
-                                    <a href="${doc.viewUrl}" target="_blank" class="btn btn-sm btn-outline-primary me-1">View</a>
-                                    <a href="${doc.downloadUrl}" target="_blank" download class="btn btn-sm btn-outline-success">Download</a>
-                                </div>
-                            </div>
-                        </div>`;
-                });
-                $("#leadDocumentsContainer").html(html);
-            },
+        $.getJSON(api.docs, { leadId: leadId }, function (response) {
+            var html = "";
+            (response.success ? response.data : []).forEach(function (doc) {
+                html += '<div class="border rounded p-3 mb-3"><div class="d-flex justify-content-between align-items-start flex-wrap gap-2"><div>' +
+                    '<div class="fw-semibold"><i class="ri-file-pdf-line text-danger me-1"></i>' + escHtml(doc.fileName) + "</div>" +
+                    '<div class="small text-muted mt-1">Uploaded by ' + escHtml(doc.employeeName) + " &middot; " + escHtml(doc.uploadedAt) + "</div></div><div>" +
+                    '<a href="' + escHtml(doc.viewUrl) + '" target="_blank" rel="noopener" class="btn btn-sm btn-outline-primary me-1">View</a>' +
+                    '<a href="' + escHtml(doc.downloadUrl) + '" class="btn btn-sm btn-outline-success">Download</a></div></div></div>';
+            });
+            $("#leadDocumentsContainer").html(html || '<div class="text-center text-muted py-4">No documents uploaded.</div>');
         });
     }
 
-    $(document).on("click", "#uploadLeadDocumentBtn", function () {
+    $("#uploadLeadDocumentBtn").on("click", function () {
         var leadId = $("#documentLeadId").val();
         var file = $("#leadDocumentFile")[0].files[0];
-        if (!file) {
-            showToast("warning", "Please select a PDF.");
-            return;
-        }
+        if (!file) { toast("warning", "Please select a PDF."); return; }
         var formData = new FormData();
         formData.append("leadId", leadId);
         formData.append("document", file);
-        $.ajax({
-            url: uploadLeadDocumentApiUrl,
-            type: "POST",
-            data: formData,
-            processData: false,
-            contentType: false,
-            dataType: "json",
-            success: function (response) {
-                if (!response.success) {
-                    showToast("error", response.message);
-                    return;
-                }
-                showToast("success", response.message);
+        $.ajax({ url: api.uploadDoc, type: "POST", data: formData, processData: false, contentType: false, dataType: "json" })
+            .done(function (response) {
+                if (!response || !response.success) { toast("danger", (response && response.message) || "Upload failed."); return; }
+                toast("success", response.message);
                 $("#leadDocumentFile").val("");
                 loadLeadDocuments(leadId);
-            },
-            error: function () {
-                showToast("error", "Upload failed.");
-            },
-        });
-    });
-
-    // Follow-up close
-    $(document).on("change", ".followup-status", function () {
-        let status = $(this).val();
-        let leadId = $(this).data("id");
-        if (status === "close") {
-            $("#followupLeadId").val(leadId);
-            $("#followupCloseRemark").val("");
-            $("#followupRemarkModal").modal("show");
-        }
-    });
-
-    $(document).on("click", "#saveFollowupRemarkBtn", function () {
-        let leadId = $("#followupLeadId").val();
-        let remark = $("#followupCloseRemark").val().trim();
-        if (remark === "") {
-            showToast("warning", "Please enter remark");
-            return;
-        }
-        $.ajax({
-            url: API_BASE + "/leads/closeFollowup.php",
-            type: "POST",
-            dataType: "json",
-            data: { leadId: leadId, remark: remark },
-            success: function (response) {
-                if (response.success) {
-                    $("#followupRemarkModal").modal("hide");
-                    showToast("success", "Follow up closed");
-                    loadScheduledCalls($("#scheduledCallsDate").val());
-                }
-            }
-        });
-    });
-
-    // Status change modal
-    function openLeadStatusModal(leadId, status) {
-        $("#statusLeadId").val(leadId);
-        $("#selectedLeadStatus").val(status);
-        $("#selectedStatusText").text(formatStatusLabel(status));
-        $("#statusRemark").val("");
-        $("#finalPrice").val("");
-        $("#nextPriceIncrementDate").val("");
-        $("#quotationDocument").val("");
-        if (status === "converted") {
-            $("#convertedFields").show();
-        } else {
-            $("#convertedFields").hide();
-        }
-        $("#leadStatusModal").modal("show");
-    }
-
-    $(document).on("click", "#saveLeadStatusBtn", function () {
-        var leadId = $("#statusLeadId").val();
-        var status = $("#selectedLeadStatus").val();
-        var remark = $("#statusRemark").val().trim();
-        if (remark === "") {
-            showToast("warning", "Please enter remark.");
-            return;
-        }
-        if (status === "converted") {
-            saveConvertedLead(leadId, status, remark);
-        } else {
-            saveNotInterestedLead(leadId, status, remark);
-        }
-    });
-
-    function saveNotInterestedLead(leadId, status, remark) {
-        $.ajax({
-            url: API_BASE + "/leads/saveLeadStatusRemark.php",
-            type: "POST",
-            dataType: "json",
-            contentType: "application/json",
-            data: JSON.stringify({ leadId: leadId, status: status, remark: remark }),
-        })
-            .done(function (response) {
-                if (!response.success) {
-                    showToast("error", response.message);
-                    return;
-                }
-                updateLeadStatus(leadId, status);
             })
-            .fail(function () {
-                showToast("error", "Failed to save remark.");
-            });
-    }
+            .fail(function (xhr) { toast("danger", apiError(xhr, "Upload failed.")); });
+    });
 
-    function saveConvertedLead(leadId, status, remark) {
-        var finalPrice = $("#finalPrice").val();
-        if (finalPrice === "") {
-            showToast("warning", "Please enter final price.");
-            return;
-        }
-        var formData = new FormData();
-        formData.append("leadId", leadId);
-        formData.append("statusRemark", remark);
-        formData.append("finalPrice", finalPrice);
-        formData.append("nextPriceIncrementDate", $("#nextPriceIncrementDate").val());
-        if ($("#quotationDocument")[0].files.length) {
-            formData.append("quotationDocument", $("#quotationDocument")[0].files[0]);
-        }
-        $.ajax({
-            url: API_BASE + "/leads/saveLeadConversion.php",
-            type: "POST",
-            data: formData,
-            processData: false,
-            contentType: false,
-            dataType: "json",
-        })
-            .done(function (response) {
-                if (!response.success) {
-                    showToast("error", response.message);
-                    return;
-                }
-                updateLeadStatus(leadId, status);
-            })
-            .fail(function () {
-                showToast("error", "Failed to save conversion.");
-            });
-    }
-
-    function updateLeadStatus(leadId, status) {
-        $.ajax({
-            url: updateLeadStatusApiUrl,
-            method: "POST",
-            contentType: "application/json",
-            dataType: "json",
-            data: JSON.stringify({ id: leadId, status: status }),
-        })
-            .done(function (response) {
-                if (!response.success) {
-                    showToast("error", response.message);
-                    return;
-                }
-                $("#leadStatusModal").modal("hide");
-                showToast("success", response.message || "Lead status updated successfully.");
-                loadLeads();
-            })
-            .fail(function () {
-                showToast("error", "Status update failed.");
-            });
-    }
-
-    // Import Leads
+    // ---------- Import ----------
     $(document).on("submit", "#importLeadForm", function (event) {
         event.preventDefault();
-        event.stopPropagation();
-        console.log("Import form submitted");
-        var employeeId = $("#importEmployeeId").val();
-        var fileInput = $("#leadCsvFile")[0];
-        var file = fileInput && fileInput.files.length ? fileInput.files[0] : null;
-        if (!employeeId) {
-            showToast("warning", "Please select employee.");
-            return;
-        }
-        if (!file) {
-            showToast("warning", "Please upload CSV file.");
-            return;
-        }
+        var file = $("#leadCsvFile")[0].files[0];
+        if (!file) { toast("warning", "Please upload a CSV file."); return; }
         var formData = new FormData();
-        formData.append("employeeId", employeeId);
         formData.append("leadCsvFile", file);
+        formData.append("employeeId", $("#importEmployeeId").val() || "");
         $("#importLeadSubmitBtn").prop("disabled", true);
         $("#importLeadSpinner").removeClass("d-none");
-        $.ajax({
-            url: importLeadsApiUrl,
-            type: "POST",
-            data: formData,
-            processData: false,
-            contentType: false,
-            dataType: "json",
-            timeout: 60000
-        })
+        $("#importLeadErrors").addClass("d-none").empty();
+        $.ajax({ url: api.importCsv, type: "POST", data: formData, processData: false, contentType: false, dataType: "json", timeout: 60000 })
             .done(function (response) {
-                if (!response.success) {
-                    showToast("error", response.message || "Import failed.");
-                    return;
+                var errors = (response && response.data && response.data.errors) || [];
+                if (errors.length) {
+                    $("#importLeadErrors").removeClass("d-none").html(errors.map(escHtml).join("<br>"));
                 }
-                showToast("success", response.message || "Leads imported successfully.");
-                $("#importLeadModal").modal("hide");
-                $("#importLeadForm")[0].reset();
-                location.reload();
+                toast(response && response.success ? "success" : "danger", (response && response.message) || "Import failed.");
+                if (response && response.success) {
+                    loadLeads();
+                    if (!errors.length) $("#importLeadModal").modal("hide");
+                }
             })
-            .fail(function (xhr, status, error) {
-                var message = "Import failed.";
-                if (status === "timeout") message = "Import request timed out.";
-                if (xhr.responseJSON && xhr.responseJSON.message) message = xhr.responseJSON.message;
-                showToast("error", message);
-            })
+            .fail(function (xhr, status) { toast("danger", status === "timeout" ? "Import request timed out." : apiError(xhr, "Import failed.")); })
             .always(function () {
                 $("#importLeadSubmitBtn").prop("disabled", false);
                 $("#importLeadSpinner").addClass("d-none");
             });
     });
 
-    $("#importLeadModal").on("show.bs.modal hidden.bs.modal", function () {
-        $("#importLeadSubmitBtn").prop("disabled", false);
-        $("#importLeadSpinner").addClass("d-none");
-    });
-
-    // Deep link from Follow Up List ("Open Lead") -- /leads?leadId=123 opens
-    // that lead's existing Remarks modal directly, reusing loadLeadRemarks()
-    // above instead of a separate lead-detail view.
-    (function openLeadFromQueryString() {
-        var params = new URLSearchParams(window.location.search);
-        var leadId = params.get("leadId");
+    // Deep link (Follow-ups page "Open"): ?leadId=123 opens that lead's remarks.
+    function openLeadFromQueryString() {
+        var leadId = new URLSearchParams(window.location.search).get("leadId");
         if (!leadId) return;
+        var row = rowById(leadId);
+        openRemarks(leadId, row ? row.fullName : "");
+    }
 
-        $("#remarkLeadId").val(leadId);
-        $("#remarkLeadName").text(params.get("leadName") || "");
-        $("#leadRemark").val("");
-        loadLeadRemarks(leadId);
-        $("#leadRemarkModal").modal("show");
-    })();
-
+    // ---------- Boot ----------
+    $.getJSON(api.master)
+        .done(function (response) {
+            if (response && response.success) {
+                master = response.data;
+                applyMasterData();
+            }
+            loadLeads();
+            if (leadsRequest) leadsRequest.done(openLeadFromQueryString);
+        })
+        .fail(function (xhr) { toast("danger", apiError(xhr, "Unable to load lead options.")); });
 });

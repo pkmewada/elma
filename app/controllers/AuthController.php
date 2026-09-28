@@ -295,7 +295,7 @@ class AuthController
         $emailValue = getQuery('email');
 
         if ($emailValue === '' && $_SERVER['REQUEST_METHOD'] === 'GET') {
-            redirectTo('signup');
+            redirectTo('login');
         }
 
         if (!isDevMode() && $_SERVER['REQUEST_METHOD'] === 'GET' && getQuery('email_sent') === '0') {

@@ -1,7 +1,7 @@
 <footer class="footer mt-auto py-3 bg-white text-center">
     <div class="container">
         <span class="text-muted"> Copyright &copy; <span id="year"></span> <a
-                href="javascript:void(0);" class="text-dark fw-medium">MQlus</a>.
+                href="javascript:void(0);" class="text-dark fw-medium"><?= htmlspecialchars(BRAND_NAME, ENT_QUOTES, 'UTF-8') ?></a>.
             Designed with <span class="bi bi-heart-fill text-danger"></span> by <a href="https://mqlus.in" target="__blank">
                 <span class="fw-medium text-primary">MQlus.in</span>
             </a> All rights reserved
@@ -38,7 +38,7 @@
     <div id="primaryToast" class="toast colored-toast bg-primary-transparent" role="alert" aria-live="assertive" aria-atomic="true" data-bs-delay="3000">
         <div class="toast-header bg-primary text-fixed-white">
             <img class="bd-placeholder-img rounded me-2" src="<?= ASSET_URL ?>/assets/images/brand-logos/toggle-dark.png" alt="Mamix">
-            <strong class="me-auto">MQlus</strong>
+            <strong class="me-auto"><?= htmlspecialchars(BRAND_NAME, ENT_QUOTES, 'UTF-8') ?></strong>
             <button type="button" class="btn-close" data-bs-dismiss="toast" aria-label="Close"></button>
         </div>
         <div class="toast-body"></div>
@@ -46,7 +46,7 @@
     <div id="secondaryToast" class="toast colored-toast bg-secondary-transparent" role="alert" aria-live="assertive" aria-atomic="true" data-bs-delay="3000">
         <div class="toast-header bg-secondary text-fixed-white">
             <img class="bd-placeholder-img rounded me-2" src="<?= ASSET_URL ?>/assets/images/brand-logos/toggle-dark.png" alt="Mamix">
-            <strong class="me-auto">MQlus</strong>
+            <strong class="me-auto"><?= htmlspecialchars(BRAND_NAME, ENT_QUOTES, 'UTF-8') ?></strong>
             <button type="button" class="btn-close" data-bs-dismiss="toast" aria-label="Close"></button>
         </div>
         <div class="toast-body"></div>
@@ -54,7 +54,7 @@
     <div id="warningToast" class="toast colored-toast bg-warning-transparent" role="alert" aria-live="assertive" aria-atomic="true" data-bs-delay="3000">
         <div class="toast-header bg-warning text-fixed-white">
             <img class="bd-placeholder-img rounded me-2" src="<?= ASSET_URL ?>/assets/images/brand-logos/toggle-dark.png" alt="Mamix">
-            <strong class="me-auto">MQlus</strong>
+            <strong class="me-auto"><?= htmlspecialchars(BRAND_NAME, ENT_QUOTES, 'UTF-8') ?></strong>
             <button type="button" class="btn-close" data-bs-dismiss="toast" aria-label="Close"></button>
         </div>
         <div class="toast-body"></div>
@@ -62,7 +62,7 @@
     <div id="infoToast" class="toast colored-toast bg-info-transparent" role="alert" aria-live="assertive" aria-atomic="true" data-bs-delay="3000">
         <div class="toast-header bg-info text-fixed-white">
             <img class="bd-placeholder-img rounded me-2" src="<?= ASSET_URL ?>/assets/images/brand-logos/toggle-dark.png" alt="Mamix">
-            <strong class="me-auto">MQlus</strong>
+            <strong class="me-auto"><?= htmlspecialchars(BRAND_NAME, ENT_QUOTES, 'UTF-8') ?></strong>
             <button type="button" class="btn-close" data-bs-dismiss="toast" aria-label="Close"></button>
         </div>
         <div class="toast-body"></div>
@@ -70,7 +70,7 @@
     <div id="successToast" class="toast colored-toast bg-success-transparent" role="alert" aria-live="assertive" aria-atomic="true" data-bs-delay="3000">
         <div class="toast-header bg-success text-fixed-white">
             <img class="bd-placeholder-img rounded me-2" src="<?= ASSET_URL ?>/assets/images/brand-logos/toggle-dark.png" alt="Mamix">
-            <strong class="me-auto">MQlus</strong>
+            <strong class="me-auto"><?= htmlspecialchars(BRAND_NAME, ENT_QUOTES, 'UTF-8') ?></strong>
             <button type="button" class="btn-close" data-bs-dismiss="toast" aria-label="Close"></button>
         </div>
         <div class="toast-body"></div>
@@ -78,7 +78,7 @@
     <div id="dangerToast" class="toast colored-toast bg-danger-transparent" role="alert" aria-live="assertive" aria-atomic="true" data-bs-delay="3000">
         <div class="toast-header bg-danger text-fixed-white">
             <img class="bd-placeholder-img rounded me-2" src="<?= ASSET_URL ?>/assets/images/brand-logos/toggle-dark.png" alt="Mamix">
-            <strong class="me-auto">MQlus</strong>
+            <strong class="me-auto"><?= htmlspecialchars(BRAND_NAME, ENT_QUOTES, 'UTF-8') ?></strong>
             <button type="button" class="btn-close" data-bs-dismiss="toast" aria-label="Close"></button>
         </div>
         <div class="toast-body"></div>
@@ -115,38 +115,6 @@
 <script src="<?= ASSET_URL ?>/assets/libs/filepond/filepond.min.js"></script>
 <script src="<?= ASSET_URL ?>/assets/libs/quill/quill.min.js"></script>
 
-<?php
-
-$currentFooterPath = parse_url(
-    $_SERVER['REQUEST_URI'] ?? '/',
-    PHP_URL_PATH
-) ?? '';
-
-$basePath = parse_url(BASE_URL, PHP_URL_PATH) ?? '';
-$basePath = rtrim($basePath, '/');
-
-if ($basePath !== '' && strpos($currentFooterPath, $basePath) === 0) {
-
-    $currentFooterPath = substr(
-        $currentFooterPath,
-        strlen($basePath)
-    );
-}
-
-$currentFooterPath = '/' . ltrim($currentFooterPath, '/');
-$currentFooterPath = rtrim($currentFooterPath, '/');
-
-if (
-    $currentFooterPath === '/dashboard' ||
-    $currentFooterPath === ''
-) :
-?>
-<!-- Apex Charts JS -->
-<script src="<?= ASSET_URL ?>/assets/libs/apexcharts/apexcharts.min.js"></script>
-
-<!-- Sales Dashboard -->
-<script src="<?= ASSET_URL ?>/assets/js/sales-dashboard.js"></script>
-<?php endif; ?>
 
 <!-- Custom JS -->
 <script src="<?= ASSET_URL ?>/assets/js/custom.js?v=theme-fix-1"></script>

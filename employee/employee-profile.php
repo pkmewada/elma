@@ -19,7 +19,7 @@ Fallback
 
 if (empty($profilePhotoUrl)) {
     
-$profilePhotoUrl = ASSET_URL . '/assets/images/faces/team/7.png'; } ?>
+$profilePhotoUrl = ASSET_URL . '/assets/images/faces/default-avatar.svg'; } ?>
 
 <div class="main-content app-content">
     <div class="container-fluid">

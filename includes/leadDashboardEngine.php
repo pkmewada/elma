@@ -69,9 +69,9 @@ class LeadDashboardEngine
     {
         $result = mysqli_query(
             $this->con,
-            "SELECT DISTINCT source FROM leads
-            WHERE source IS NOT NULL AND source <> ''
-            ORDER BY source ASC"
+            "SELECT sourceName AS source FROM leadSources
+            WHERE isActive = 1
+            ORDER BY sortOrder ASC, sourceName ASC"
         );
 
         $sources = [];
@@ -83,7 +83,7 @@ class LeadDashboardEngine
     }
 
     /**
-     * Only employees who actually own leads (leads.createdByCandidateId) --
+     * Only employees who have leads assigned (leads.assignedToId) --
      * the same assignment relation every existing Lead Management screen
      * uses, not the full HR employee directory.
      */
@@ -93,7 +93,7 @@ class LeadDashboardEngine
             $this->con,
             "SELECT DISTINCT eu.id, eu.fullName
             FROM employeeusers eu
-            INNER JOIN leads l ON l.createdByCandidateId = eu.id
+            INNER JOIN leads l ON l.assignedToId = eu.id
             ORDER BY eu.fullName ASC"
         );
 
@@ -236,7 +236,7 @@ class LeadDashboardEngine
                 COUNT(DISTINCT CASE WHEN f.status = 'Pending' AND f.dueDate BETWEEN ? AND ? THEN f.id END) AS pendingFollowUps,
                 COUNT(DISTINCT CASE WHEN f.status = 'Completed' AND f.dueDate BETWEEN ? AND ? THEN f.id END) AS completedFollowUps
             FROM leads l
-            INNER JOIN employeeusers eu ON eu.id = l.createdByCandidateId
+            INNER JOIN employeeusers eu ON eu.id = l.assignedToId
             LEFT JOIN leadFollowUps f ON f.leadId = l.id
             WHERE $leadWhere
             GROUP BY eu.id, eu.fullName
@@ -274,12 +274,12 @@ class LeadDashboardEngine
         $types = '';
 
         if ($employeeId > 0) {
-            $where[] = 'l.createdByCandidateId = ?';
+            $where[] = 'l.assignedToId = ?';
             $params[] = $employeeId;
             $types .= 'i';
         }
         if ($source !== '') {
-            $where[] = 'l.source = ?';
+            $where[] = 'l.sourceId IN (SELECT id FROM leadSources WHERE sourceName = ?)';
             $params[] = $source;
             $types .= 's';
         }
@@ -298,7 +298,7 @@ class LeadDashboardEngine
                 ) AS lastAction
             FROM leadFollowUps f
             INNER JOIN leads l ON l.id = f.leadId
-            LEFT JOIN employeeusers eu ON eu.id = l.createdByCandidateId
+            LEFT JOIN employeeusers eu ON eu.id = l.assignedToId
             WHERE " . implode(' AND ', $where) . "
             ORDER BY f.updatedAt DESC, f.id DESC
             LIMIT 15
@@ -345,12 +345,12 @@ class LeadDashboardEngine
         $types = '';
 
         if ($employeeId > 0) {
-            $where[] = 'l.createdByCandidateId = ?';
+            $where[] = 'l.assignedToId = ?';
             $params[] = $employeeId;
             $types .= 'i';
         }
         if ($source !== '') {
-            $where[] = 'l.source = ?';
+            $where[] = 'l.sourceId IN (SELECT id FROM leadSources WHERE sourceName = ?)';
             $params[] = $source;
             $types .= 's';
         }
@@ -391,12 +391,12 @@ class LeadDashboardEngine
         $types = 'sss';
 
         if ($employeeId > 0) {
-            $where[] = 'l.createdByCandidateId = ?';
+            $where[] = 'l.assignedToId = ?';
             $params[] = $employeeId;
             $types .= 'i';
         }
         if ($source !== '') {
-            $where[] = 'l.source = ?';
+            $where[] = 'l.sourceId IN (SELECT id FROM leadSources WHERE sourceName = ?)';
             $params[] = $source;
             $types .= 's';
         }

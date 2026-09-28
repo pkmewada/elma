@@ -2,329 +2,183 @@
 
 header('Content-Type: application/json');
 
-require_once __DIR__ . '/../../includes/permission-helper.php';
-require_once __DIR__ . '/../../includes/leadActivityLogger.php';
-
-if (session_status() !== PHP_SESSION_ACTIVE) {
-    session_start();
-}
-
-if (!isLoggedIn()) {
-    http_response_code(401);
-
-    echo json_encode([
-        'success' => false,
-        'message' => 'Unauthorized access.'
-    ]);
-
-    exit;
-}
-
-if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    http_response_code(405);
-
-    echo json_encode([
-        'success' => false,
-        'message' => 'Method not allowed.'
-    ]);
-
-    exit;
-}
-
-$userType = getLoggedInUserType();
-$permissionRoute = $userType === 'employee' ? '/emp-leads' : '/leads';
-
-requireActionPermission($permissionRoute, 'import_leads');
+require_once __DIR__ . '/../../includes/db.php';
+require_once __DIR__ . '/../../includes/leadAccess.php';
 
 /*
 |--------------------------------------------------------------------------
-| Static Values
+| CSV lead import
 |--------------------------------------------------------------------------
-| Later change these IDs as per your database.
-|--------------------------------------------------------------------------
+| POST multipart {leadCsvFile, employeeId?} + CSRF (gateway) + the
+| 'import_leads' special action on the caller's lead page.
+|
+| Columns (header row, any order): name, phone required; email, countryCode
+| (default +91), country (default India), project, source (default Other),
+| status (default New), assignedTo (employee email), remark optional.
+| project / source / status / assignedTo must match exactly (case-insensitive)
+| an existing active record - unknown values reject that row, never create
+| new masters. Rows whose phone already exists are skipped (duplicates).
+| Default assignee: the importing employee, or employeeId chosen by an admin.
 */
+requireLeadPost();
+requireActionPermission(leadCallerRoute(), 'import_leads');
 
-$staticCategoryId = 3;
-$staticPlanId = 3;
-$status = 'open';
+$file = $_FILES['leadCsvFile'] ?? null;
 
-$employeeId = (int)($_POST['employeeId'] ?? 0);
-
-if ($userType === 'employee') {
-    $employeeId = getLoggedInUserId();
+if (!$file || ($file['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
+    leadJsonExit(422, 'Please upload a valid CSV file.');
 }
 
-if ($employeeId <= 0) {
-    http_response_code(422);
-
-    echo json_encode([
-        'success' => false,
-        'message' => 'Please select employee.'
-    ]);
-
-    exit;
+if ((int)$file['size'] > 5 * 1024 * 1024) {
+    leadJsonExit(422, 'CSV file must be smaller than 5 MB.');
 }
 
-if (
-    empty($_FILES['leadCsvFile'])
-    || $_FILES['leadCsvFile']['error'] !== UPLOAD_ERR_OK
-) {
-    http_response_code(422);
+$csvMimeType = (string)(new finfo(FILEINFO_MIME_TYPE))->file((string)$file['tmp_name']);
+$extension = strtolower(pathinfo((string)$file['name'], PATHINFO_EXTENSION));
 
-    echo json_encode([
-        'success' => false,
-        'message' => 'Please upload a valid CSV file.'
-    ]);
-
-    exit;
+if ($extension !== 'csv' || !in_array($csvMimeType, ['text/plain', 'text/csv', 'application/csv', 'text/x-csv', 'application/vnd.ms-excel'], true)) {
+    leadJsonExit(422, 'Only CSV files are allowed.');
 }
 
-$fileName = $_FILES['leadCsvFile']['name'];
-$fileTmpPath = $_FILES['leadCsvFile']['tmp_name'];
-$fileExt = strtolower(pathinfo($fileName, PATHINFO_EXTENSION));
+$defaultAssignee = resolveNewLeadAssignee($con, (int)($_POST['employeeId'] ?? 0));
 
-if ($fileExt !== 'csv') {
-    http_response_code(422);
-
-    echo json_encode([
-        'success' => false,
-        'message' => 'Only CSV file is allowed.'
-    ]);
-
-    exit;
+// Lookup maps (lower-cased) for deterministic matching.
+$projects = [];
+foreach (mysqli_fetch_all(mysqli_query($con, 'SELECT id, projectName FROM projects WHERE isActive = 1'), MYSQLI_ASSOC) as $row) {
+    $projects[mb_strtolower($row['projectName'])] = (int)$row['id'];
 }
-
-$handle = fopen($fileTmpPath, 'r');
-
-if (!$handle) {
-    http_response_code(500);
-
-    echo json_encode([
-        'success' => false,
-        'message' => 'Unable to read CSV file.'
-    ]);
-
-    exit;
+$sources = [];
+foreach (mysqli_fetch_all(mysqli_query($con, 'SELECT id, sourceKey, sourceName FROM leadSources WHERE isActive = 1'), MYSQLI_ASSOC) as $row) {
+    $sources[mb_strtolower($row['sourceName'])] = (int)$row['id'];
+    $sources[mb_strtolower($row['sourceKey'])] = (int)$row['id'];
 }
-
-$header = fgetcsv($handle);
-
-$requiredColumns = [
-    'fullName',
-    'email',
-    'phone',
-    'source',
-    'orgName'
-];
-
-$header = array_map('trim', $header ?: []);
-
-foreach ($requiredColumns as $column) {
-    if (!in_array($column, $header, true)) {
-        echo json_encode([
-            'success' => false,
-            'message' => 'Invalid CSV format. Required columns: fullName, email, phone, source'
-        ]);
-
-        fclose($handle);
-        exit;
+$statuses = [];
+foreach (LEAD_STATUSES as $key => $label) {
+    $statuses[$key] = $key;
+    $statuses[mb_strtolower($label)] = $key;
+}
+$assignees = [];
+if (canAssignLeads()) {
+    $emails = mysqli_fetch_all(mysqli_query($con, 'SELECT id, emailAddress FROM employeeusers'), MYSQLI_ASSOC);
+    $assignable = array_column(getAssignableEmployees($con), 'id');
+    foreach ($emails as $row) {
+        if (in_array((int)$row['id'], $assignable, true)) {
+            $assignees[mb_strtolower($row['emailAddress'])] = (int)$row['id'];
+        }
     }
 }
 
-$columnMap = array_flip($header);
+$handle = fopen((string)$file['tmp_name'], 'r');
+$header = array_map(static fn($h) => mb_strtolower(trim((string)$h, " \t\n\r\0\x0B\xEF\xBB\xBF")), fgetcsv($handle) ?: []);
+$column = array_flip($header);
 
-// Country/countryCode are optional columns -- old-style CSVs (just the
-// original 5 columns) keep importing exactly as before, defaulting to
-// India/+91 rather than being left without any country information.
-$hasCountryColumn = isset($columnMap['country']);
-$hasCountryCodeColumn = isset($columnMap['countryCode']);
-
-$insertStmt = mysqli_prepare(
-    $con,
-    "
-    INSERT INTO leads
-    (
-        fullName,
-        email,
-        phone,
-        country,
-        countryCode,
-        source,
-        orgName,
-        categoryId,
-        planId,
-        status,
-        createdByCandidateId
-    )
-    VALUES
-    (
-        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
-    )
-    "
-);
-
-if (!$insertStmt) {
-    fclose($handle);
-
-    http_response_code(500);
-
-    echo json_encode([
-        'success' => false,
-        'message' => 'Failed to prepare import query.'
-    ]);
-
-    exit;
+foreach (['name', 'phone'] as $required) {
+    if (!isset($column[$required])) {
+        fclose($handle);
+        leadJsonExit(422, 'Invalid CSV header. Required columns: name, phone. Optional: email, countryCode, country, project, source, status, assignedTo, remark.');
+    }
 }
+
+$get = static fn(array $row, string $key): string => isset($column[$key]) ? trim((string)($row[$column[$key]] ?? '')) : '';
+$otherSourceId = $sources['other'] ?? null;
+$actor = getCurrentActor();
+$createdByCandidateId = $actor['type'] === 'employee' ? $actor['id'] : null;
+
+$insert = mysqli_prepare(
+    $con,
+    'INSERT INTO leads (fullName, email, phone, country, countryCode, projectId, sourceId, assignedToId, status, createdByCandidateId, createdByType)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+);
+$dupCheck = mysqli_prepare($con, 'SELECT id FROM leads WHERE phone = ? AND countryCode = ? LIMIT 1');
 
 $imported = 0;
-$skipped = 0;
+$duplicates = 0;
 $errors = [];
+$line = 1;
 
 while (($row = fgetcsv($handle)) !== false) {
-
-    $fullName = trim($row[$columnMap['fullName']] ?? '');
-    $email = trim($row[$columnMap['email']] ?? '');
-    $phone = trim($row[$columnMap['phone']] ?? '');
-    $source = trim($row[$columnMap['source']] ?? '');
-    $orgName = trim($row[$columnMap['orgName']] ?? '');
-
-    $country = $hasCountryColumn ? trim($row[$columnMap['country']] ?? '') : '';
-    $countryCode = $hasCountryCodeColumn ? trim($row[$columnMap['countryCode']] ?? '') : '';
-
-    if ($country === '') {
-        $country = 'India';
-    }
-    if ($countryCode === '') {
-        $countryCode = '+91';
-    } elseif ($countryCode[0] !== '+') {
-        $countryCode = '+' . $countryCode;
-    }
-
-    if (
-        $fullName === ''
-        || $email === ''
-        || $phone === ''
-        || $source === ''
-        || $orgName === ''
-        || !filter_var($email, FILTER_VALIDATE_EMAIL)
-        || !preg_match('/^\+\d{1,4}$/', $countryCode)
-        || !preg_match('/^[0-9]{6,15}$/', $phone)
-    ) {
-        $skipped++;
+    $line++;
+    if (count(array_filter($row, static fn($v) => trim((string)$v) !== '')) === 0) {
         continue;
     }
 
-    mysqli_stmt_bind_param(
-        $insertStmt,
-        'sssssssiisi',
-        $fullName,
-        $email,
-        $phone,
-        $country,
-        $countryCode,
-        $source,
-        $orgName,
-        $staticCategoryId,
-        $staticPlanId,
-        $status,
-        $employeeId
-    );
+    $name = $get($row, 'name');
+    $phone = preg_replace('/\D/', '', $get($row, 'phone')) ?? '';
+    $email = $get($row, 'email');
+    $countryCode = $get($row, 'countrycode') ?: '+91';
+    $country = $get($row, 'country') ?: 'India';
+    $projectText = mb_strtolower($get($row, 'project'));
+    $sourceText = mb_strtolower($get($row, 'source'));
+    $statusText = mb_strtolower($get($row, 'status'));
+    $assigneeText = mb_strtolower($get($row, 'assignedto'));
+    $remark = $get($row, 'remark');
 
-    if (mysqli_stmt_execute($insertStmt)) {
-        $imported++;
-    } else {
-        $skipped++;
-        $errors[] = $email;
+    $problem = null;
+    if ($name === '' || strlen($phone) < 6 || strlen($phone) > 15) {
+        $problem = 'name and a 6-15 digit phone are required';
+    } elseif ($email !== '' && !filter_var($email, FILTER_VALIDATE_EMAIL)) {
+        $problem = 'invalid email';
+    } elseif (!preg_match('/^\+\d{1,4}$/', $countryCode)) {
+        $problem = 'invalid countryCode (use +91 format)';
+    } elseif ($projectText !== '' && !isset($projects[$projectText])) {
+        $problem = 'unknown project "' . $get($row, 'project') . '"';
+    } elseif ($sourceText !== '' && !isset($sources[$sourceText])) {
+        $problem = 'unknown source "' . $get($row, 'source') . '"';
+    } elseif ($statusText !== '' && !isset($statuses[$statusText])) {
+        $problem = 'unknown status "' . $get($row, 'status') . '"';
+    } elseif ($assigneeText !== '' && !isset($assignees[$assigneeText])) {
+        $problem = canAssignLeads() ? 'unknown salesperson "' . $get($row, 'assignedto') . '"' : 'assignedTo requires assign permission';
+    }
+
+    if ($problem) {
+        $errors[] = "Row {$line}: {$problem}";
+        continue;
+    }
+
+    mysqli_stmt_bind_param($dupCheck, 'ss', $phone, $countryCode);
+    mysqli_stmt_execute($dupCheck);
+    if (mysqli_fetch_assoc(mysqli_stmt_get_result($dupCheck))) {
+        $duplicates++;
+        continue;
+    }
+
+    $emailValue = $email !== '' ? $email : null;
+    $projectId = $projectText !== '' ? $projects[$projectText] : null;
+    $sourceId = $sourceText !== '' ? $sources[$sourceText] : $otherSourceId;
+    $assignedToId = $assigneeText !== '' ? $assignees[$assigneeText] : ($defaultAssignee['id'] ?? null);
+    $status = $statusText !== '' ? $statuses[$statusText] : 'new';
+
+    mysqli_stmt_bind_param($insert, 'sssssiiisis', $name, $emailValue, $phone, $country, $countryCode,
+        $projectId, $sourceId, $assignedToId, $status, $createdByCandidateId, $actor['type']);
+
+    if (!mysqli_stmt_execute($insert)) {
+        $errors[] = "Row {$line}: could not be saved";
+        continue;
+    }
+
+    $leadId = (int)mysqli_insert_id($con);
+    $imported++;
+    saveActivityLog($con, 'Lead', $leadId, 'CREATE', 'Lead imported from CSV : ' . $name, null, ['phone' => $countryCode . ' ' . $phone]);
+
+    if ($remark !== '') {
+        createLeadRemark($con, $leadId, $remark);
     }
 }
 
-mysqli_stmt_close($insertStmt);
 fclose($handle);
+mysqli_stmt_close($insert);
+mysqli_stmt_close($dupCheck);
 
-
-/*
-|--------------------------------------------------------------------------
-| Activity Logger
-|--------------------------------------------------------------------------
-*/
-
-
-if ($imported > 0) {
-
-    $assignedEmployee = (string)$employeeId;
-    $employeeStmt = mysqli_prepare(
-        $con,
-        'SELECT fullName FROM employeeusers WHERE id = ? LIMIT 1'
-    );
-
-    if ($employeeStmt) {
-        mysqli_stmt_bind_param($employeeStmt, 'i', $employeeId);
-        mysqli_stmt_execute($employeeStmt);
-        $employeeRow = mysqli_fetch_assoc(mysqli_stmt_get_result($employeeStmt));
-        $assignedEmployee = $employeeRow['fullName'] ?? $assignedEmployee;
-        mysqli_stmt_close($employeeStmt);
-    }
-
-
-    saveActivityLog(
-
-        $con,
-
-        "Lead",
-
-        null,
-
-        "IMPORT",
-
-        "Bulk lead import completed",
-
-        null,
-
-        [
-
-            "fileName" =>
-                $fileName,
-
-
-            "assignedEmployee" =>
-                $assignedEmployee,
-
-
-            "imported" =>
-                $imported,
-
-
-            "skipped" =>
-                $skipped,
-
-
-            "errors" =>
-                $errors,
-
-
-            "categoryId" =>
-                $staticCategoryId,
-
-
-            "planId" =>
-                $staticPlanId,
-
-
-            "status" =>
-                $status
-
-        ]
-
-    );
-
+$message = "{$imported} lead(s) imported";
+if ($duplicates) {
+    $message .= ", {$duplicates} duplicate(s) skipped";
+}
+if ($errors) {
+    $message .= ', ' . count($errors) . ' row(s) rejected';
 }
 
 echo json_encode([
-    'success' => true,
-    'message' => $imported . ' leads imported successfully. ' . $skipped . ' skipped.',
-    'data' => [
-        'imported' => $imported,
-        'skipped' => $skipped,
-        'errors' => $errors
-    ]
+    'success' => $imported > 0 || (!$errors && $duplicates > 0),
+    'message' => $message . '.',
+    'data' => ['imported' => $imported, 'duplicates' => $duplicates, 'errors' => array_slice($errors, 0, 50)],
 ]);

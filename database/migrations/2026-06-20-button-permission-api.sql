@@ -1,3 +1,0 @@
-ALTER TABLE permissionActions
-    ADD COLUMN IF NOT EXISTS apiEndpoint VARCHAR(255) DEFAULT NULL AFTER buttonSelector,
-    ADD COLUMN IF NOT EXISTS httpMethod VARCHAR(10) DEFAULT NULL AFTER apiEndpoint;

@@ -492,7 +492,7 @@ $base = ASSET_URL . '/';
                     <div class="card-body p-5">
                         <p class="h4 mb-2 fw-semibold">Sign Up</p>
                         <p class="mb-4 text-muted">Join us by creating a free account !</p>
-                        <form method="post" action="signup">
+                        <form method="post" action="signup"><?php require_once __DIR__ . '/../../includes/Csrf.php'; echo getCsrfInput(); ?>
                             <div class="row gy-3">
                                 <div class="col-12 col-lg-6">
                                     <label for="signup-name" class="form-label text-default">Full Name</label>

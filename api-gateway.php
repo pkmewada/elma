@@ -44,6 +44,32 @@ if (
 }
 
 $requestMethod = strtoupper((string)($_SERVER['REQUEST_METHOD'] ?? 'GET'));
+
+/*
+|--------------------------------------------------------------------------
+| Session + CSRF for every API
+|--------------------------------------------------------------------------
+| All CRM APIs are private (no public/webhook endpoints exist yet; a future
+| inbound webhook must be exempted explicitly here with its own signature
+| check). Every non-GET request must carry the session CSRF token in the
+| X-CSRF-Token header (sent automatically by the layout's CSRF shim) or a
+| csrfToken form field.
+*/
+require_once __DIR__ . '/includes/permission-helper.php';
+require_once __DIR__ . '/includes/Csrf.php';
+
+if (!isLoggedIn()) {
+    $apiGatewayRespond(401, 'Unauthorized access.');
+}
+
+if (!in_array($requestMethod, ['GET', 'HEAD'], true)) {
+    $csrfToken = $_SERVER['HTTP_X_CSRF_TOKEN'] ?? ($_POST['csrfToken'] ?? null);
+
+    if (!validateCsrfToken(is_string($csrfToken) ? $csrfToken : null)) {
+        $apiGatewayRespond(403, 'Your session could not be verified. Please refresh the page and try again.');
+    }
+}
+
 $permissionStmt = $con->prepare("
     SELECT
         rm.routePath,

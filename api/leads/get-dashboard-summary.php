@@ -15,6 +15,12 @@ header('Content-Type: application/json');
 
 require_once __DIR__ . '/../../includes/db.php';
 require_once __DIR__ . '/../../includes/leadDashboardEngine.php';
+require_once __DIR__ . '/../../includes/leadAccess.php';
+
+// Dashboard view permission (admin or employee dashboard route). Users
+// without full lead scope only ever get their own figures.
+requireApiPermission(['/lead-dashboard', '/emp-lead-dashboard'], 'canView');
+$scopeEmployeeId = getLeadScopeEmployeeId();
 
 if (session_status() !== PHP_SESSION_ACTIVE) {
     session_start();
@@ -27,7 +33,7 @@ if (empty($_SESSION['candidateId']) && empty($_SESSION['userId'])) {
 }
 
 $filters = [
-    'employeeId' => (int)($_GET['employeeId'] ?? 0),
+    'employeeId' => $scopeEmployeeId !== 0 ? $scopeEmployeeId : (int)($_GET['employeeId'] ?? 0),
     'source' => trim((string)($_GET['source'] ?? '')),
     'dateFrom' => trim((string)($_GET['dateFrom'] ?? '')),
     'dateTo' => trim((string)($_GET['dateTo'] ?? '')),

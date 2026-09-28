@@ -45,7 +45,7 @@ $base = ASSET_URL . '/';
                                 <a href="candidate-waiting" class="btn btn-primary">Continue</a>
                             </div>
                         <?php else: ?>
-                            <form method="post" action="candidate-reset-password">
+                            <form method="post" action="candidate-reset-password"><?php require_once __DIR__ . '/../../includes/Csrf.php'; echo getCsrfInput(); ?>
                                 <div class="row gy-3">
                                     <div class="col-12">
                                         <label class="form-label text-default">Current (Temporary) Password</label>
