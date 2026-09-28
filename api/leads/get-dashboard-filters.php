@@ -6,7 +6,7 @@ require_once __DIR__ . '/../../includes/db.php';
 require_once __DIR__ . '/../../includes/leadDashboardEngine.php';
 require_once __DIR__ . '/../../includes/leadAccess.php';
 
-requireApiPermission(['/lead-dashboard', '/emp-lead-dashboard'], 'canView');
+requireApiPermission(['/lead-dashboard', '/emp-lead-dashboard', '/emp-dashboard'], 'canView');
 $scopeEmployeeId = getLeadScopeEmployeeId();
 
 if (session_status() !== PHP_SESSION_ACTIVE) {
@@ -30,6 +30,7 @@ try {
                 ? $engine->getAssignedEmployees()
                 : array_values(array_filter($engine->getAssignedEmployees(), static fn($employee) => (int)$employee['id'] === $scopeEmployeeId)),
             'sources' => $engine->getSources(),
+            'projects' => $engine->getProjects(),
         ],
     ]);
 } catch (Exception $e) {

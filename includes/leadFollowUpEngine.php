@@ -211,6 +211,8 @@ class LeadFollowUpEngine
     | upcoming  Pending, due after today
     | overdue   Pending, due before today
     | completed Completed (most recent first)
+    | all       Every status/date (Reports "Follow-up Report" only) --
+    |            dateFrom/dateTo/status/projectId in $filters narrow it further.
     | Pending follow-ups of Converted / Lost leads are not actionable and are
     | left out of the pending views (the rows themselves are kept).
     */
@@ -228,6 +230,8 @@ class LeadFollowUpEngine
                 return "f.status = 'Pending' AND f.dueDate < CURDATE() AND l.status NOT IN ('converted', 'lost')";
             case 'completed':
                 return "f.status = 'Completed'";
+            case 'all':
+                return '1=1';
         }
 
         throw new Exception('Invalid follow-up view.');
@@ -236,6 +240,8 @@ class LeadFollowUpEngine
     /**
      * $filters: view, leadId, search, scopeEmployeeId (0 = all leads; else
      * only leads assigned to that employee - same rule as the lead APIs).
+     * Reports-only additions (view=all): status, dateFrom, dateTo (on
+     * f.dueDate), projectId.
      */
     public function getFollowUpList($filters = [])
     {
@@ -267,6 +273,41 @@ class LeadFollowUpEngine
             $where[] = 'l.assignedToId = ?';
             $params[] = $scopeEmployeeId;
             $types .= 'i';
+        } elseif ((int)($filters['employeeId'] ?? 0) > 0) {
+            // Reports only: a full-scope caller (admin / view-all-leads)
+            // choosing one salesperson. Restricted callers ignore this --
+            // scopeEmployeeId above already pins them to themselves.
+            $where[] = 'l.assignedToId = ?';
+            $params[] = (int)$filters['employeeId'];
+            $types .= 'i';
+        }
+
+        $status = trim((string)($filters['status'] ?? ''));
+        if ($status !== '' && in_array($status, ['Pending', 'Completed', 'Skipped'], true)) {
+            $where[] = 'f.status = ?';
+            $params[] = $status;
+            $types .= 's';
+        }
+
+        $projectId = (int)($filters['projectId'] ?? 0);
+        if ($projectId > 0) {
+            $where[] = 'l.projectId = ?';
+            $params[] = $projectId;
+            $types .= 'i';
+        }
+
+        $dateFrom = (string)($filters['dateFrom'] ?? '');
+        if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $dateFrom)) {
+            $where[] = 'f.dueDate >= ?';
+            $params[] = $dateFrom;
+            $types .= 's';
+        }
+
+        $dateTo = (string)($filters['dateTo'] ?? '');
+        if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $dateTo)) {
+            $where[] = 'f.dueDate <= ?';
+            $params[] = $dateTo;
+            $types .= 's';
         }
 
         $order = ($view === 'completed' && $leadId <= 0)
@@ -294,7 +335,7 @@ class LeadFollowUpEngine
             LEFT JOIN employeeusers rea ON rea.id = f.resolvedByCandidateId AND f.resolvedByType = 'employee'
             WHERE " . implode(' AND ', $where) . "
             ORDER BY {$order}
-            LIMIT 500
+            LIMIT 2000
         ";
 
         $stmt = mysqli_prepare($this->con, $sql);

@@ -11,7 +11,7 @@ $(function () {
     var getDashboardUrl = API_BASE + '/leads/get-dashboard-summary.php';
 
     var rangeFp = null;
-    var charts = { trend: null, status: null, followUp: null, employee: null };
+    var charts = { trend: null, status: null, followUp: null, employee: null, source: null, project: null };
 
     // ApexCharts cannot parse CSS custom properties ('var(--primary-color)',
     // 'rgb(var(--success-rgb))') when it derives shades, and throws. Resolve
@@ -44,7 +44,8 @@ $(function () {
         customFrom: null,
         customTo: null,
         employeeId: '',
-        source: ''
+        source: '',
+        projectId: ''
     };
 
     function esc(str) {
@@ -111,13 +112,21 @@ $(function () {
 
             var employees = response.data.employees || [];
             var sources = response.data.sources || [];
+            var projects = response.data.projects || [];
 
+            // Restricted callers (own-scope only) get exactly one employee
+            // back (themselves) -- the filter would be a no-op, so hide it.
+            $('#ldEmployee').toggleClass('d-none', employees.length <= 1);
             $('#ldEmployee').append(employees.map(function (e) {
                 return '<option value="' + e.id + '">' + esc(e.fullName) + '</option>';
             }).join(''));
 
             $('#ldSource').append(sources.map(function (s) {
                 return '<option value="' + esc(s) + '">' + esc(s) + '</option>';
+            }).join(''));
+
+            $('#ldProject').append(projects.map(function (p) {
+                return '<option value="' + p.id + '">' + esc(p.projectName) + '</option>';
             }).join(''));
         }).fail(function () {
             notify('danger', 'Unable to load dashboard filters.');
@@ -133,6 +142,7 @@ $(function () {
         $.getJSON(getDashboardUrl, {
             employeeId: state.employeeId,
             source: state.source,
+            projectId: state.projectId,
             dateFrom: range[0],
             dateTo: range[1]
         }, function (response) {
@@ -145,6 +155,8 @@ $(function () {
             renderSummary(data.summary);
             renderLeadTrend(data.leadTrend);
             renderStatusChart(data.statusDistribution);
+            renderBreakdownChart('source', data.bySource);
+            renderBreakdownChart('project', data.byProject);
             renderFollowUpChart(data.followUpPerformance);
             renderEmployeeChart(data.employeePerformance);
             renderRecentTable(data.recentFollowUps);
@@ -154,11 +166,18 @@ $(function () {
     }
 
     function renderSummary(summary) {
+        summary = summary || {};
         $('#ldTotalLeads').text(summary.totalLeads ?? 0);
         $('#ldNewLeads').text(summary.newLeads ?? 0);
+        $('#ldTodayFollowUps').text(summary.todayFollowUps ?? 0);
+        $('#ldOverdueFollowUps').text(summary.overdueFollowUps ?? 0);
+        $('#ldSiteVisits').text(summary.siteVisits ?? 0);
+        $('#ldConvertedLeads').text(summary.convertedLeads ?? 0);
+        $('#ldLostLeads').text(summary.lostLeads ?? 0);
+        $('#ldConversionRate').text((summary.conversionRate ?? 0) + '%');
+        // Present on pages that still have the legacy card ids (none currently).
         $('#ldPendingFollowUps').text(summary.pendingFollowUps ?? 0);
         $('#ldCompletedFollowUps').text(summary.completedFollowUps ?? 0);
-        $('#ldConvertedLeads').text(summary.convertedLeads ?? 0);
     }
 
     function renderLeadTrend(trend) {
@@ -184,7 +203,7 @@ $(function () {
             charts.trend = new ApexCharts(document.querySelector('#ldLeadTrendChart'), resolveChartColors(options));
             charts.trend.render();
         } else {
-            charts.trend.updateOptions(options);
+            charts.trend.updateOptions(resolveChartColors(options));
         }
     }
 
@@ -205,7 +224,47 @@ $(function () {
             charts.status = new ApexCharts(document.querySelector('#ldStatusChart'), resolveChartColors(options));
             charts.status.render();
         } else {
-            charts.status.updateOptions(options);
+            charts.status.updateOptions(resolveChartColors(options));
+        }
+    }
+
+    // Shared renderer for "Leads by Source" / "Leads by Project" -- same
+    // shape ([{label, count}]) and same simple bar-chart treatment.
+    function renderBreakdownChart(key, rows) {
+        rows = rows || [];
+        var elId = key === 'source' ? '#ldSourceChart' : '#ldProjectChart';
+        var emptyId = key === 'source' ? null : '#ldProjectChartEmpty';
+        var hasData = rows.length > 0;
+
+        if (emptyId) {
+            $(emptyId).toggleClass('d-none', hasData);
+            $(elId).toggleClass('d-none', !hasData);
+        }
+
+        if (!hasData) {
+            if (charts[key]) { charts[key].destroy(); charts[key] = null; }
+            return;
+        }
+
+        var options = {
+            series: [{ name: 'Leads', data: rows.map(function (r) { return r.count; }) }],
+            chart: { type: 'bar', height: Math.max(300, rows.length * 42), toolbar: { show: false } },
+            plotOptions: { bar: { horizontal: true, borderRadius: 3, columnWidth: '55%', distributed: true } },
+            colors: ['var(--primary-color)', 'rgb(var(--success-rgb))', 'rgb(var(--warning-rgb))', '#0dcaf0', 'rgb(var(--danger-rgb))', 'rgb(var(--secondary-rgb))', '#f4a742', '#845adf'],
+            legend: { show: false },
+            dataLabels: { enabled: true },
+            grid: { borderColor: 'var(--default-border)' },
+            xaxis: {
+                categories: rows.map(function (r) { return r.label; }),
+                labels: { style: { colors: '#8c9097', fontSize: '11px', fontWeight: 600 } }
+            }
+        };
+
+        if (!charts[key]) {
+            charts[key] = new ApexCharts(document.querySelector(elId), resolveChartColors(options));
+            charts[key].render();
+        } else {
+            charts[key].updateOptions(resolveChartColors(options));
         }
     }
 
@@ -234,7 +293,7 @@ $(function () {
             charts.followUp = new ApexCharts(document.querySelector('#ldFollowUpChart'), resolveChartColors(options));
             charts.followUp.render();
         } else {
-            charts.followUp.updateOptions(options);
+            charts.followUp.updateOptions(resolveChartColors(options));
         }
     }
 
@@ -272,7 +331,7 @@ $(function () {
             charts.employee = new ApexCharts(document.querySelector('#ldEmployeeChart'), resolveChartColors(options));
             charts.employee.render();
         } else {
-            charts.employee.updateOptions(options);
+            charts.employee.updateOptions(resolveChartColors(options));
         }
     }
 
@@ -326,6 +385,11 @@ $(function () {
 
     $('#ldSource').on('change', function () {
         state.source = $(this).val();
+        loadDashboard();
+    });
+
+    $('#ldProject').on('change', function () {
+        state.projectId = $(this).val();
         loadDashboard();
     });
 

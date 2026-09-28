@@ -28,14 +28,6 @@ $esc = static fn($value) => htmlspecialchars((string)$value, ENT_QUOTES, 'UTF-8'
 <link rel="stylesheet" href="https://cdn.datatables.net/1.12.1/css/dataTables.bootstrap5.min.css" />
 <link rel="stylesheet" href="https://cdn.datatables.net/buttons/2.2.3/css/buttons.bootstrap5.min.css" />
 <style>
-    .lead-status-new { background: rgba(13, 202, 240, 0.15); color: #0aa2c0; }
-    .lead-status-contacted { background: rgba(108, 117, 125, 0.15); color: #5c636a; }
-    .lead-status-interested { background: rgba(255, 193, 7, 0.18); color: #b58900; }
-    .lead-status-follow_up { background: rgba(253, 126, 20, 0.15); color: #d9660b; }
-    .lead-status-site_visit { background: rgba(111, 66, 193, 0.15); color: #6f42c1; }
-    .lead-status-negotiation { background: rgba(13, 110, 253, 0.15); color: #0d6efd; }
-    .lead-status-converted { background: rgba(25, 135, 84, 0.15); color: #198754; }
-    .lead-status-lost { background: rgba(220, 53, 69, 0.15); color: #dc3545; }
     .lead-status-btn { font-size: 13px; font-weight: 600; }
     @media (min-width: 1200px) { #leadStatusCards > .col { flex: 1 0 0%; } }
     .lead-status-card { cursor: pointer; }

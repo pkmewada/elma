@@ -73,57 +73,17 @@ if ($duplicate) {
 }
 
 $actor = getCurrentActor();
-$createdByCandidateId = $actor['type'] === 'employee' ? $actor['id'] : null;
-$emailValue = $email !== '' ? $email : null;
-$projectId = $project['id'] ?? null;
-$assignedToId = $assignee['id'] ?? null;
-
-mysqli_begin_transaction($con);
 
 try {
-    $stmt = mysqli_prepare(
-        $con,
-        'INSERT INTO leads (fullName, email, phone, country, countryCode, projectId, sourceId, assignedToId, status, createdByCandidateId, createdByType)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
-    );
-    mysqli_stmt_bind_param(
-        $stmt,
-        'sssssiiisis',
-        $fullName, $emailValue, $phone, $country, $countryCode,
-        $projectId, $source['id'], $assignedToId, $status, $createdByCandidateId, $actor['type']
-    );
-
-    if (!mysqli_stmt_execute($stmt)) {
-        throw new RuntimeException('Insert failed: ' . mysqli_stmt_error($stmt));
-    }
-
-    $leadId = (int)mysqli_insert_id($con);
-    mysqli_stmt_close($stmt);
-
-    saveActivityLog($con, 'Lead', $leadId, 'CREATE', 'New lead created : ' . $fullName, null, [
-        'fullName' => $fullName, 'phone' => $countryCode . ' ' . $phone, 'email' => $emailValue,
-        'project' => $project['projectName'] ?? null, 'source' => $source['sourceName'],
-        'status' => LEAD_STATUSES[$status], 'assignedTo' => $assignee['fullName'] ?? 'Unassigned',
-    ]);
-
-    if ($assignee) {
-        saveActivityLog($con, 'Lead', $leadId, 'ASSIGN', 'Lead assigned to ' . $assignee['fullName'], null, ['assignedToId' => $assignee['id']]);
-    }
-
-    if ($remark !== '') {
-        createLeadRemark($con, $leadId, $remark);
-        saveActivityLog($con, 'Lead', $leadId, 'REMARK', 'Remark added : ' . $fullName, null, ['remark' => $remark]);
-    }
-
-    if ($followUp) {
-        createManualFollowUp($con, $leadId, $followUp[0], $followUp[1], $remark);
-    }
-
-    (new LeadFollowUpEngine($con))->generateForLead($leadId, date('Y-m-d H:i:s'));
-
-    mysqli_commit($con);
+    $leadId = createLeadCore($con, [
+        'fullName' => $fullName, 'email' => $email, 'phone' => $phone, 'country' => $country, 'countryCode' => $countryCode,
+        'projectId' => $project['id'] ?? null, 'projectName' => $project['projectName'] ?? null,
+        'sourceId' => $source['id'], 'sourceName' => $source['sourceName'],
+        'assignedToId' => $assignee['id'] ?? null, 'assigneeName' => $assignee['fullName'] ?? null,
+        'status' => $status, 'remark' => $remark, 'followUp' => $followUp,
+        'externalSource' => null, 'externalLeadId' => null,
+    ], $actor);
 } catch (Throwable $e) {
-    mysqli_rollback($con);
     error_log('addLead failed: ' . $e->getMessage());
     leadJsonExit(500, 'Failed to add lead.');
 }

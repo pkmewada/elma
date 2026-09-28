@@ -16,6 +16,13 @@ $filters = [
     'leadId' => (int)($_GET['leadId'] ?? 0),
     'search' => trim((string)($_GET['search'] ?? '')),
     'scopeEmployeeId' => getLeadScopeEmployeeId(),
+    // Reports "Follow-up Report" only (view=all); no-ops for the Today/
+    // Upcoming/Overdue/Completed tabs, which never send these.
+    'employeeId' => (int)($_GET['employeeId'] ?? 0),
+    'status' => trim((string)($_GET['status'] ?? '')),
+    'projectId' => (int)($_GET['projectId'] ?? 0),
+    'dateFrom' => trim((string)($_GET['dateFrom'] ?? '')),
+    'dateTo' => trim((string)($_GET['dateTo'] ?? '')),
 ];
 
 try {

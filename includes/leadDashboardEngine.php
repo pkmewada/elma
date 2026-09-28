@@ -5,24 +5,32 @@
 | Lead Dashboard Engine
 |--------------------------------------------------------------------------
 |
-| Read-only analytics for pages/lead-dashboard.php, computed entirely from
-| existing tables -- leads, leadFollowUps (includes/leadFollowUpEngine.php's
-| data), employeeusers and leadsActivityLogs. No new tables, no separate
-| aggregation store.
+| Read-only analytics for the CRM dashboard (pages/dashboard.php,
+| pages/lead-dashboard.php, employee/emp-lead-dashboard.php, and the compact
+| widget on employee/emp-dashboard.php), computed entirely from existing
+| tables -- leads, leadFollowUps, leadSources, projects, employeeusers and
+| leadsActivityLogs. No new tables, no separate aggregation store.
 |
 | Filter scoping (deliberate, see getDashboardData()):
-| - employeeId / source narrow every metric below.
+| - employeeId / source / projectId narrow every metric below.
 | - dateFrom/dateTo scope "activity in a period" metrics: New Leads, the
 |   Lead Trend chart, both Follow Up counts/charts and per-employee
 |   follow-up counts (all bucketed on their own date: leads.createdAt for
 |   leads, leadFollowUps.dueDate for follow ups).
-| - Total Leads, Converted Leads, the Status Distribution chart and each
-|   employee's "Assigned Leads" count stay lifetime totals ("all leads",
-|   as specified) under the employee/source scope -- they represent the
-|   current pipeline, not a windowed count.
+| - Total/Converted/Lost/Site Visit/Unassigned Leads, Today's/Overdue
+|   Follow-ups, Status/Source/Project distributions and each employee's
+|   "Assigned Leads" count stay lifetime totals ("all leads") under the
+|   employee/source/project scope -- they represent the current pipeline,
+|   not a windowed count. Today's/Overdue follow-ups additionally exclude
+|   Converted/Lost leads, same rule as includes/leadFollowUpEngine.php's
+|   "today"/"overdue" views, since those are no longer actionable.
+| - Each "by X" breakdown (bySource/byProject/byEmployee) omits its own
+|   dimension from the filter it applies (e.g. bySource ignores the Source
+|   filter) so selecting a single source doesn't collapse its own chart to
+|   one bar; the other filters still narrow it.
 | - The Recent Follow Up table is a live activity feed (latest updated
-|   rows), scoped by employee/source but not by the date range, same as
-|   any "recent activity" widget.
+|   rows), scoped by employee/source/project but not by the date range,
+|   same as any "recent activity" widget.
 |
 */
 
@@ -82,6 +90,22 @@ class LeadDashboardEngine
         return $sources;
     }
 
+    /** Active projects, for the dashboard's Project filter. */
+    public function getProjects()
+    {
+        $result = mysqli_query(
+            $this->con,
+            "SELECT id, projectName FROM projects WHERE isActive = 1 ORDER BY projectName ASC"
+        );
+
+        $projects = [];
+        while ($row = mysqli_fetch_assoc($result)) {
+            $projects[] = ['id' => (int)$row['id'], 'projectName' => $row['projectName']];
+        }
+
+        return $projects;
+    }
+
     /**
      * Only employees who have leads assigned (leads.assignedToId) --
      * the same assignment relation every existing Lead Management screen
@@ -115,6 +139,7 @@ class LeadDashboardEngine
     {
         $employeeId = (int)($filters['employeeId'] ?? 0);
         $source = trim((string)($filters['source'] ?? ''));
+        $projectId = (int)($filters['projectId'] ?? 0);
         $dateFrom = trim((string)($filters['dateFrom'] ?? ''));
         $dateTo = trim((string)($filters['dateTo'] ?? ''));
 
@@ -123,35 +148,48 @@ class LeadDashboardEngine
         }
 
         return [
-            'summary' => $this->getSummary($employeeId, $source, $dateFrom, $dateTo),
-            'leadTrend' => $this->getLeadTrend($employeeId, $source, $dateFrom, $dateTo),
-            'statusDistribution' => $this->getStatusDistribution($employeeId, $source),
-            'followUpPerformance' => $this->getFollowUpPerformance($employeeId, $source, $dateFrom, $dateTo),
-            'employeePerformance' => $this->getEmployeePerformance($employeeId, $source, $dateFrom, $dateTo),
-            'recentFollowUps' => $this->getRecentFollowUps($employeeId, $source),
+            'summary' => $this->getSummary($employeeId, $source, $projectId, $dateFrom, $dateTo),
+            'leadTrend' => $this->getLeadTrend($employeeId, $source, $projectId, $dateFrom, $dateTo),
+            'statusDistribution' => $this->getStatusDistribution($employeeId, $source, $projectId),
+            'bySource' => $this->getBySource($employeeId, $projectId),
+            'byProject' => $this->getByProject($employeeId, $source),
+            'followUpPerformance' => $this->getFollowUpPerformance($employeeId, $source, $projectId, $dateFrom, $dateTo),
+            'employeePerformance' => $this->getEmployeePerformance($employeeId, $source, $projectId, $dateFrom, $dateTo),
+            'recentFollowUps' => $this->getRecentFollowUps($employeeId, $source, $projectId),
         ];
     }
 
-    private function getSummary($employeeId, $source, $dateFrom, $dateTo)
+    private function getSummary($employeeId, $source, $projectId, $dateFrom, $dateTo)
     {
-        $totalLeads = $this->countLeads($employeeId, $source, null, null, null);
-        $newLeads = $this->countLeads($employeeId, $source, null, $dateFrom, $dateTo);
-        $convertedLeads = $this->countLeads($employeeId, $source, 'converted', null, null);
-        $pendingFollowUps = $this->countFollowUps($employeeId, $source, 'Pending', $dateFrom, $dateTo);
-        $completedFollowUps = $this->countFollowUps($employeeId, $source, 'Completed', $dateFrom, $dateTo);
+        $totalLeads = $this->countLeads($employeeId, $source, $projectId, null, null, null);
+        $newLeads = $this->countLeads($employeeId, $source, $projectId, null, $dateFrom, $dateTo);
+        $convertedLeads = $this->countLeads($employeeId, $source, $projectId, 'converted', null, null);
+        $lostLeads = $this->countLeads($employeeId, $source, $projectId, 'lost', null, null);
+        $siteVisits = $this->countLeads($employeeId, $source, $projectId, 'site_visit', null, null);
+        $unassignedLeads = $this->countUnassignedLeads($source, $projectId);
+        $pendingFollowUps = $this->countFollowUps($employeeId, $source, $projectId, 'Pending', $dateFrom, $dateTo);
+        $completedFollowUps = $this->countFollowUps($employeeId, $source, $projectId, 'Completed', $dateFrom, $dateTo);
+        $todayFollowUps = $this->countActiveFollowUpsByDate($employeeId, $source, $projectId, '=');
+        $overdueFollowUps = $this->countActiveFollowUpsByDate($employeeId, $source, $projectId, '<');
 
         return [
             'totalLeads' => $totalLeads,
             'newLeads' => $newLeads,
+            'todayFollowUps' => $todayFollowUps,
+            'overdueFollowUps' => $overdueFollowUps,
+            'siteVisits' => $siteVisits,
+            'convertedLeads' => $convertedLeads,
+            'lostLeads' => $lostLeads,
             'pendingFollowUps' => $pendingFollowUps,
             'completedFollowUps' => $completedFollowUps,
-            'convertedLeads' => $convertedLeads,
+            'unassignedLeads' => $unassignedLeads,
+            'conversionRate' => $totalLeads > 0 ? round($convertedLeads / $totalLeads * 100, 1) : 0,
         ];
     }
 
-    private function getLeadTrend($employeeId, $source, $dateFrom, $dateTo)
+    private function getLeadTrend($employeeId, $source, $projectId, $dateFrom, $dateTo)
     {
-        [$where, $params, $types] = $this->leadWhere($employeeId, $source, null, $dateFrom, $dateTo);
+        [$where, $params, $types] = $this->leadWhere($employeeId, $source, $projectId, null, $dateFrom, $dateTo);
 
         $sql = "SELECT DATE(l.createdAt) AS d, COUNT(*) AS c
                 FROM leads l
@@ -186,9 +224,9 @@ class LeadDashboardEngine
         return $trend;
     }
 
-    private function getStatusDistribution($employeeId, $source)
+    private function getStatusDistribution($employeeId, $source, $projectId)
     {
-        [$where, $params, $types] = $this->leadWhere($employeeId, $source, null, null, null);
+        [$where, $params, $types] = $this->leadWhere($employeeId, $source, $projectId, null, null, null);
 
         $sql = "SELECT l.status, COUNT(*) AS c
                 FROM leads l
@@ -216,18 +254,76 @@ class LeadDashboardEngine
         return $distribution;
     }
 
-    private function getFollowUpPerformance($employeeId, $source, $dateFrom, $dateTo)
+    /** Leads by Source -- ignores the Source filter itself (see file header). */
+    private function getBySource($employeeId, $projectId)
+    {
+        [$where, $params, $types] = $this->leadWhere($employeeId, '', $projectId, null, null, null);
+
+        $sql = "SELECT COALESCE(s.sourceName, 'Unknown') AS label, COUNT(*) AS c
+                FROM leads l
+                LEFT JOIN leadSources s ON s.id = l.sourceId
+                WHERE $where
+                GROUP BY label
+                ORDER BY c DESC";
+
+        $stmt = mysqli_prepare($this->con, $sql);
+        if ($types !== '') {
+            mysqli_stmt_bind_param($stmt, $types, ...$params);
+        }
+        mysqli_stmt_execute($stmt);
+        $result = mysqli_stmt_get_result($stmt);
+
+        $rows = [];
+        while ($row = mysqli_fetch_assoc($result)) {
+            $rows[] = ['label' => $row['label'], 'count' => (int)$row['c']];
+        }
+        mysqli_stmt_close($stmt);
+
+        return $rows;
+    }
+
+    /** Leads by Project -- ignores the Project filter itself (see file header). */
+    private function getByProject($employeeId, $source)
+    {
+        [$where, $params, $types] = $this->leadWhere($employeeId, $source, 0, null, null, null);
+
+        $sql = "SELECT COALESCE(p.projectName, 'No Project') AS label, COUNT(*) AS c
+                FROM leads l
+                LEFT JOIN projects p ON p.id = l.projectId
+                WHERE $where
+                GROUP BY label
+                ORDER BY c DESC
+                LIMIT 15";
+
+        $stmt = mysqli_prepare($this->con, $sql);
+        if ($types !== '') {
+            mysqli_stmt_bind_param($stmt, $types, ...$params);
+        }
+        mysqli_stmt_execute($stmt);
+        $result = mysqli_stmt_get_result($stmt);
+
+        $rows = [];
+        while ($row = mysqli_fetch_assoc($result)) {
+            $rows[] = ['label' => $row['label'], 'count' => (int)$row['c']];
+        }
+        mysqli_stmt_close($stmt);
+
+        return $rows;
+    }
+
+    private function getFollowUpPerformance($employeeId, $source, $projectId, $dateFrom, $dateTo)
     {
         return [
-            'Pending' => $this->countFollowUps($employeeId, $source, 'Pending', $dateFrom, $dateTo),
-            'Completed' => $this->countFollowUps($employeeId, $source, 'Completed', $dateFrom, $dateTo),
-            'Skipped' => $this->countFollowUps($employeeId, $source, 'Skipped', $dateFrom, $dateTo),
+            'Pending' => $this->countFollowUps($employeeId, $source, $projectId, 'Pending', $dateFrom, $dateTo),
+            'Completed' => $this->countFollowUps($employeeId, $source, $projectId, 'Completed', $dateFrom, $dateTo),
+            'Skipped' => $this->countFollowUps($employeeId, $source, $projectId, 'Skipped', $dateFrom, $dateTo),
         ];
     }
 
-    private function getEmployeePerformance($employeeId, $source, $dateFrom, $dateTo)
+    /** Leads by Sales Executive (+ their follow-up load in the selected range). */
+    private function getEmployeePerformance($employeeId, $source, $projectId, $dateFrom, $dateTo)
     {
-        [$leadWhere, $leadParams, $leadTypes] = $this->leadWhere($employeeId, $source, null, null, null);
+        [$leadWhere, $leadParams, $leadTypes] = $this->leadWhere($employeeId, $source, $projectId, null, null, null);
 
         $sql = "
             SELECT
@@ -267,22 +363,9 @@ class LeadDashboardEngine
         return $rows;
     }
 
-    private function getRecentFollowUps($employeeId, $source)
+    private function getRecentFollowUps($employeeId, $source, $projectId)
     {
-        $where = ['1=1'];
-        $params = [];
-        $types = '';
-
-        if ($employeeId > 0) {
-            $where[] = 'l.assignedToId = ?';
-            $params[] = $employeeId;
-            $types .= 'i';
-        }
-        if ($source !== '') {
-            $where[] = 'l.sourceId IN (SELECT id FROM leadSources WHERE sourceName = ?)';
-            $params[] = $source;
-            $types .= 's';
-        }
+        [$leadWhere, $params, $types] = $this->leadWhere($employeeId, $source, $projectId, null, null, null);
 
         $sql = "
             SELECT
@@ -299,7 +382,7 @@ class LeadDashboardEngine
             FROM leadFollowUps f
             INNER JOIN leads l ON l.id = f.leadId
             LEFT JOIN employeeusers eu ON eu.id = l.assignedToId
-            WHERE " . implode(' AND ', $where) . "
+            WHERE $leadWhere
             ORDER BY f.updatedAt DESC, f.id DESC
             LIMIT 15
         ";
@@ -316,7 +399,7 @@ class LeadDashboardEngine
             $rows[] = [
                 'leadId' => (int)$row['leadId'],
                 'leadName' => $row['leadName'],
-                'employeeName' => $row['employeeName'] ?? 'Admin',
+                'employeeName' => $row['employeeName'] ?? 'Unassigned',
                 'dueDate' => $row['dueDate'],
                 'followUpSequence' => (int)$row['followUpSequence'],
                 'followUpType' => $row['followUpType'],
@@ -338,7 +421,7 @@ class LeadDashboardEngine
     /**
      * @return array [whereSql, params, types]
      */
-    private function leadWhere($employeeId, $source, $status, $dateFrom, $dateTo)
+    private function leadWhere($employeeId, $source, $projectId, $status, $dateFrom, $dateTo)
     {
         $where = ['1=1'];
         $params = [];
@@ -353,6 +436,11 @@ class LeadDashboardEngine
             $where[] = 'l.sourceId IN (SELECT id FROM leadSources WHERE sourceName = ?)';
             $params[] = $source;
             $types .= 's';
+        }
+        if ($projectId > 0) {
+            $where[] = 'l.projectId = ?';
+            $params[] = $projectId;
+            $types .= 'i';
         }
         if ($status !== null) {
             $where[] = 'l.status = ?';
@@ -369,9 +457,9 @@ class LeadDashboardEngine
         return [implode(' AND ', $where), $params, $types];
     }
 
-    private function countLeads($employeeId, $source, $status, $dateFrom, $dateTo)
+    private function countLeads($employeeId, $source, $projectId, $status, $dateFrom, $dateTo)
     {
-        [$where, $params, $types] = $this->leadWhere($employeeId, $source, $status, $dateFrom, $dateTo);
+        [$where, $params, $types] = $this->leadWhere($employeeId, $source, $projectId, $status, $dateFrom, $dateTo);
 
         $stmt = mysqli_prepare($this->con, "SELECT COUNT(*) AS c FROM leads l WHERE $where");
         if ($types !== '') {
@@ -384,7 +472,36 @@ class LeadDashboardEngine
         return (int)($row['c'] ?? 0);
     }
 
-    private function countFollowUps($employeeId, $source, $status, $dateFrom, $dateTo)
+    /** Unassigned leads are never in an employee's own scope, so no employeeId param. */
+    private function countUnassignedLeads($source, $projectId)
+    {
+        $where = ['l.assignedToId IS NULL'];
+        $params = [];
+        $types = '';
+
+        if ($source !== '') {
+            $where[] = 'l.sourceId IN (SELECT id FROM leadSources WHERE sourceName = ?)';
+            $params[] = $source;
+            $types .= 's';
+        }
+        if ($projectId > 0) {
+            $where[] = 'l.projectId = ?';
+            $params[] = $projectId;
+            $types .= 'i';
+        }
+
+        $stmt = mysqli_prepare($this->con, 'SELECT COUNT(*) AS c FROM leads l WHERE ' . implode(' AND ', $where));
+        if ($types !== '') {
+            mysqli_stmt_bind_param($stmt, $types, ...$params);
+        }
+        mysqli_stmt_execute($stmt);
+        $row = mysqli_fetch_assoc(mysqli_stmt_get_result($stmt));
+        mysqli_stmt_close($stmt);
+
+        return (int)($row['c'] ?? 0);
+    }
+
+    private function countFollowUps($employeeId, $source, $projectId, $status, $dateFrom, $dateTo)
     {
         $where = ['f.status = ?', 'f.dueDate BETWEEN ? AND ?'];
         $params = [$status, $dateFrom, $dateTo];
@@ -400,6 +517,11 @@ class LeadDashboardEngine
             $params[] = $source;
             $types .= 's';
         }
+        if ($projectId > 0) {
+            $where[] = 'l.projectId = ?';
+            $params[] = $projectId;
+            $types .= 'i';
+        }
 
         $sql = "SELECT COUNT(*) AS c
                 FROM leadFollowUps f
@@ -408,6 +530,49 @@ class LeadDashboardEngine
 
         $stmt = mysqli_prepare($this->con, $sql);
         mysqli_stmt_bind_param($stmt, $types, ...$params);
+        mysqli_stmt_execute($stmt);
+        $row = mysqli_fetch_assoc(mysqli_stmt_get_result($stmt));
+        mysqli_stmt_close($stmt);
+
+        return (int)($row['c'] ?? 0);
+    }
+
+    /**
+     * Today's ($operator '=') / Overdue ($operator '<') Pending follow-ups,
+     * excluding Converted/Lost leads -- same rule as
+     * includes/leadFollowUpEngine.php's "today"/"overdue" views.
+     */
+    private function countActiveFollowUpsByDate($employeeId, $source, $projectId, $operator)
+    {
+        $where = ["f.status = 'Pending'", "f.dueDate $operator CURDATE()", "l.status NOT IN ('converted', 'lost')"];
+        $params = [];
+        $types = '';
+
+        if ($employeeId > 0) {
+            $where[] = 'l.assignedToId = ?';
+            $params[] = $employeeId;
+            $types .= 'i';
+        }
+        if ($source !== '') {
+            $where[] = 'l.sourceId IN (SELECT id FROM leadSources WHERE sourceName = ?)';
+            $params[] = $source;
+            $types .= 's';
+        }
+        if ($projectId > 0) {
+            $where[] = 'l.projectId = ?';
+            $params[] = $projectId;
+            $types .= 'i';
+        }
+
+        $sql = "SELECT COUNT(*) AS c
+                FROM leadFollowUps f
+                INNER JOIN leads l ON l.id = f.leadId
+                WHERE " . implode(' AND ', $where);
+
+        $stmt = mysqli_prepare($this->con, $sql);
+        if ($types !== '') {
+            mysqli_stmt_bind_param($stmt, $types, ...$params);
+        }
         mysqli_stmt_execute($stmt);
         $row = mysqli_fetch_assoc(mysqli_stmt_get_result($stmt));
         mysqli_stmt_close($stmt);

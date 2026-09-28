@@ -13,7 +13,11 @@ uploads/*
 storage/*.json
 !storage/basic-config.example.json
 storage/lead-documents/
+storage/project-documents/
 
 # Logs (the deny rule itself is tracked)
 logs/*
 !logs/.htaccess
+
+# Full-install dump contains account password hashes — never commit
+database/install/*.sql
