@@ -36,6 +36,7 @@ $secretFields = match ($provider) {
     'meta' => ['appSecret', 'pageAccessToken', 'verifyToken'],
     'google' => ['sharedKey'],
     'website' => ['apiKey'],
+    'whatsapp' => ['accessToken', 'appSecret', 'verifyToken'],
     default => [],
 };
 
@@ -62,6 +63,30 @@ if (($config['defaultAssigneeId'] ?? null) !== null) {
     resolveAssignee($con, $config['defaultAssigneeId']);
 }
 
+if ($provider === 'whatsapp') {
+    $config['phoneNumberId'] = trim((string)($_POST['config']['phoneNumberId'] ?? ''));
+    $config['wabaId'] = trim((string)($_POST['config']['wabaId'] ?? ''));
+    $config['apiVersion'] = trim((string)($_POST['config']['apiVersion'] ?? '')) ?: null;
+
+    // Templates are managed in Meta itself; the CRM only needs the approved
+    // name/language/variable-count to build the send UI (Section 17) --
+    // one template per line: name|language|variableCount|Display label
+    $templates = [];
+    foreach (explode("\n", (string)($_POST['config']['templatesRaw'] ?? '')) as $line) {
+        $parts = array_map('trim', explode('|', $line));
+        if (($parts[0] ?? '') === '') {
+            continue;
+        }
+        $templates[] = [
+            'name' => $parts[0],
+            'language' => $parts[1] ?? 'en_US',
+            'variableCount' => (int)($parts[2] ?? 0),
+            'label' => $parts[3] ?? $parts[0],
+        ];
+    }
+    $config['templates'] = $templates;
+}
+
 if ($isEnabled && $provider === 'meta' && empty($secretsToSave['verifyToken'])) {
     integrationJsonExit(422, 'A verify token is required before Meta can be enabled (needed for the webhook handshake).');
 }
@@ -72,6 +97,15 @@ if ($isEnabled && $provider === 'google' && empty($secretsToSave['sharedKey'])) 
 
 if ($isEnabled && $provider === 'website' && empty($secretsToSave['apiKey'])) {
     integrationJsonExit(422, 'An API key is required before the website endpoint can be enabled.');
+}
+
+if ($isEnabled && $provider === 'whatsapp') {
+    if (empty($secretsToSave['verifyToken'])) {
+        integrationJsonExit(422, 'A verify token is required before WhatsApp can be enabled (needed for the webhook handshake).');
+    }
+    if (empty($secretsToSave['accessToken']) || $config['phoneNumberId'] === '') {
+        integrationJsonExit(422, 'An access token and Phone Number ID are required before WhatsApp can be enabled.');
+    }
 }
 
 saveIntegrationSettings($con, $provider, $isEnabled, $config, $secretsToSave);

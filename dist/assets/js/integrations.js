@@ -12,7 +12,7 @@ $(function () {
         saveMapping: API_BASE + "/integrations/saveFormMapping.php",
         leadMasterData: API_BASE + "/leads/getLeadMasterData.php",
     };
-    var PROVIDER_LABELS = { meta: "Meta Lead Ads", google: "Google Lead Forms", website: "Website Lead Capture" };
+    var PROVIDER_LABELS = { meta: "Meta Lead Ads", google: "Google Lead Forms", website: "Website Lead Capture", whatsapp: "WhatsApp Cloud API" };
     var settingsByProvider = {};
     var urlsByProvider = {};
     var projects = [];
@@ -87,8 +87,20 @@ $(function () {
         $("#configIsEnabled").prop("checked", !!s.isEnabled);
         $("#configDefaultSourceId").val((s.config && s.config.defaultSourceId) || "");
         $("#configDefaultAssigneeId").val((s.config && s.config.defaultAssigneeId) || "");
+        $("#configSourceAssigneeRow").toggleClass("d-none", provider === "whatsapp");
         $(".provider-fields").addClass("d-none");
         $("#" + provider + "Fields").removeClass("d-none");
+
+        if (provider === "whatsapp") {
+            var wc = s.config || {};
+            $("#whatsappPhoneNumberId").val(wc.phoneNumberId || "");
+            $("#whatsappWabaId").val(wc.wabaId || "");
+            $("#whatsappApiVersion").val(wc.apiVersion || "");
+            $("#whatsappTemplatesRaw").val((wc.templates || []).map(function (t) {
+                return [t.name, t.language, t.variableCount, t.label].join("|");
+            }).join("\n"));
+        }
+
         $("#integrationConfigModal").modal("show");
     });
 

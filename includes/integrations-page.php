@@ -57,6 +57,7 @@ $inEsc = static fn($value) => htmlspecialchars((string)$value, ENT_QUOTES, 'UTF-
                         <option value="meta">Meta Lead Ads</option>
                         <option value="google">Google Lead Forms</option>
                         <option value="website">Website</option>
+                        <option value="whatsapp">WhatsApp</option>
                     </select>
                     <select id="logStatusFilter" class="form-select">
                         <option value="">All Status</option>
@@ -131,7 +132,41 @@ $inEsc = static fn($value) => htmlspecialchars((string)$value, ENT_QUOTES, 'UTF-
                                 </div>
                             </div>
 
-                            <div class="row g-3">
+                            <div id="whatsappFields" class="provider-fields d-none">
+                                <div class="mb-3">
+                                    <label class="form-label">Verify Token</label>
+                                    <input type="text" class="form-control" name="secrets[verifyToken]" id="whatsappVerifyToken" placeholder="Used for Meta's webhook handshake" />
+                                </div>
+                                <div class="mb-3">
+                                    <label class="form-label">Access Token</label>
+                                    <input type="password" class="form-control" name="secrets[accessToken]" id="whatsappAccessToken" placeholder="Leave blank to keep current" autocomplete="new-password" />
+                                </div>
+                                <div class="mb-3">
+                                    <label class="form-label">App Secret</label>
+                                    <input type="password" class="form-control" name="secrets[appSecret]" id="whatsappAppSecret" placeholder="Leave blank to keep current" autocomplete="new-password" />
+                                </div>
+                                <div class="row g-3">
+                                    <div class="col-md-6">
+                                        <label class="form-label">Phone Number ID</label>
+                                        <input type="text" class="form-control" name="config[phoneNumberId]" id="whatsappPhoneNumberId" />
+                                    </div>
+                                    <div class="col-md-6">
+                                        <label class="form-label">WhatsApp Business Account ID</label>
+                                        <input type="text" class="form-control" name="config[wabaId]" id="whatsappWabaId" />
+                                    </div>
+                                    <div class="col-md-6">
+                                        <label class="form-label">API Version</label>
+                                        <input type="text" class="form-control" name="config[apiVersion]" id="whatsappApiVersion" placeholder="v21.0" />
+                                    </div>
+                                </div>
+                                <div class="mb-1 mt-3">
+                                    <label class="form-label">Approved Templates</label>
+                                    <textarea class="form-control" name="config[templatesRaw]" id="whatsappTemplatesRaw" rows="3" placeholder="name|language|variableCount|Display label (one per line)"></textarea>
+                                    <small class="text-muted">Templates themselves are created/approved in Meta; list them here (one per line: name|language|variable count|label) so the chat composer can offer them.</small>
+                                </div>
+                            </div>
+
+                            <div class="row g-3" id="configSourceAssigneeRow">
                                 <div class="col-md-6">
                                     <label class="form-label">Default Source (optional override)</label>
                                     <select class="form-select" name="config[defaultSourceId]" id="configDefaultSourceId"><option value="">Use provider's own source</option></select>

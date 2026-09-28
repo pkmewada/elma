@@ -215,7 +215,7 @@ $(function () {
                         (p.canEdit ? '<a href="javascript:void(0);" class="btn btn-icon btn-sm btn-info-light edit-lead-btn" data-id="' + id + '" title="Edit"><i class="ri-edit-line"></i></a> ' : "") +
                         '<a href="javascript:void(0);" class="btn btn-icon btn-sm btn-secondary-light document-btn" data-id="' + id + '" title="Documents"><i class="ri-file-pdf-line"></i></a> ' +
                         '<a href="tel:+' + escHtml(waNumber(row)) + '" class="btn btn-icon btn-sm btn-primary-light call-btn" data-id="' + id + '" title="Call"><i class="ri-phone-line"></i></a> ' +
-                        '<a href="https://wa.me/' + escHtml(waNumber(row)) + '?text=' + encodeURIComponent("Hello " + row.fullName) + '" target="_blank" rel="noopener" class="btn btn-icon btn-sm btn-success-light whatsapp-btn" data-id="' + id + '" title="WhatsApp"><i class="ri-whatsapp-line"></i></a> ' +
+                        '<a href="' + escHtml(WHATSAPP_CHAT_URL) + "?leadId=" + id + '" class="btn btn-icon btn-sm btn-success-light whatsapp-btn" data-id="' + id + '" title="WhatsApp (opens CRM chat)"><i class="ri-whatsapp-line"></i></a> ' +
                         (p.canAssign ? '<a href="javascript:void(0);" class="btn btn-icon btn-sm btn-purple-light assign-lead-btn" data-id="' + id + '" title="' + (row.assignedToId ? "Reassign" : "Assign") + '"><i class="ri-user-shared-line"></i></a> ' : "") +
                         (p.canDelete ? '<a href="javascript:void(0);" class="btn btn-icon btn-sm btn-danger-light delete-lead-btn" data-id="' + id + '" title="Delete"><i class="ri-delete-bin-line"></i></a>' : "");
                 } },
@@ -580,10 +580,12 @@ $(function () {
             .fail(function (xhr) { toast("danger", apiError(xhr, "Failed to delete lead")); });
     });
 
-    // ---------- Call / WhatsApp (log that the action was opened) ----------
-    $("#leads-datatable").on("click", ".call-btn, .whatsapp-btn", function () {
-        var channel = $(this).hasClass("call-btn") ? "call" : "whatsapp";
-        $.ajax({ url: api.contact, method: "POST", dataType: "json", data: { leadId: $(this).data("id"), channel: channel } });
+    // ---------- Call (log that the action was opened) ----------
+    // WhatsApp now navigates into the CRM's own chat page (WHATSAPP_CHAT_URL)
+    // instead of wa.me; that page's own activity logging covers sent/received
+    // messages, so there is nothing to log on the click itself here anymore.
+    $("#leads-datatable").on("click", ".call-btn", function () {
+        $.ajax({ url: api.contact, method: "POST", dataType: "json", data: { leadId: $(this).data("id"), channel: "call" } });
     });
 
     // ---------- Remarks + follow-ups ----------

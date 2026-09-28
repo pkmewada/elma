@@ -374,6 +374,7 @@ $esc = static fn($value) => htmlspecialchars((string)$value, ENT_QUOTES, 'UTF-8'
 <script src="https://cdn.datatables.net/buttons/2.2.3/js/buttons.html5.min.js"></script>
 <script>
     var leadsFilterPrefill = <?= json_encode($leadPagePrefill) ?>;
+    var WHATSAPP_CHAT_URL = <?= json_encode($leadPageWhatsappUrl ?? 'whatsapp') ?>;
 </script>
 <script src="<?= ASSET_URL ?>/assets/js/lead-country-data.js?v=<?= filemtime(dirname(__DIR__) . '/dist/assets/js/lead-country-data.js') ?>"></script>
 <script src="<?= ASSET_URL ?>/assets/js/lead.js?v=<?= filemtime(dirname(__DIR__) . '/dist/assets/js/lead.js') ?>"></script>

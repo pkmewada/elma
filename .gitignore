@@ -14,6 +14,7 @@ storage/*.json
 !storage/basic-config.example.json
 storage/lead-documents/
 storage/project-documents/
+storage/whatsapp-media/
 
 # Logs (the deny rule itself is tracked)
 logs/*
