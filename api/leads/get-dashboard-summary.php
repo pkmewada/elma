@@ -5,10 +5,10 @@
 | Lead Dashboard Data
 |--------------------------------------------------------------------------
 |
-| Single combined endpoint (summary cards + all 4 charts + recent follow
-| up table in one response) -- same "one analytics call per filter change"
-| pattern already used by api/social-content/get-analytics.php, since every
-| widget on this page shares the exact same filter set anyway.
+| Single combined endpoint (summary cards + all charts + recent follow up
+| table in one response) -- same "one analytics call per filter change"
+| pattern already used elsewhere, since every widget on the dashboard
+| shares the exact same filter set anyway.
 */
 
 header('Content-Type: application/json');
@@ -19,7 +19,7 @@ require_once __DIR__ . '/../../includes/leadAccess.php';
 
 // Dashboard view permission (admin or employee dashboard route). Users
 // without full lead scope only ever get their own figures.
-requireApiPermission(['/lead-dashboard', '/emp-lead-dashboard'], 'canView');
+requireApiPermission(['/lead-dashboard', '/emp-lead-dashboard', '/emp-dashboard'], 'canView');
 $scopeEmployeeId = getLeadScopeEmployeeId();
 
 if (session_status() !== PHP_SESSION_ACTIVE) {
@@ -35,6 +35,7 @@ if (empty($_SESSION['candidateId']) && empty($_SESSION['userId'])) {
 $filters = [
     'employeeId' => $scopeEmployeeId !== 0 ? $scopeEmployeeId : (int)($_GET['employeeId'] ?? 0),
     'source' => trim((string)($_GET['source'] ?? '')),
+    'projectId' => (int)($_GET['projectId'] ?? 0),
     'dateFrom' => trim((string)($_GET['dateFrom'] ?? '')),
     'dateTo' => trim((string)($_GET['dateTo'] ?? '')),
 ];

@@ -47,14 +47,27 @@ $requestMethod = strtoupper((string)($_SERVER['REQUEST_METHOD'] ?? 'GET'));
 
 /*
 |--------------------------------------------------------------------------
-| Session + CSRF for every API
+| Session + CSRF for every API, except public integration endpoints
 |--------------------------------------------------------------------------
-| All CRM APIs are private (no public/webhook endpoints exist yet; a future
-| inbound webhook must be exempted explicitly here with its own signature
-| check). Every non-GET request must carry the session CSRF token in the
-| X-CSRF-Token header (sent automatically by the layout's CSRF shim) or a
-| csrfToken form field.
+| Every CRM API requires a logged-in session + CSRF EXCEPT the three public
+| lead-capture endpoints below, which are external machine endpoints (Meta/
+| Google webhooks, the website's enquiry form) authenticated by the
+| provider's own signature/shared-secret/API-key check inside each file
+| (includes/integrationAccess.php) instead -- never a CRM session, per
+| CLAUDE.md Phase 6. Path-traversal/file-existence checks above still apply
+| to them unchanged.
 */
+$publicIntegrationEndpoints = [
+    '/api/integrations/meta-webhook.php',
+    '/api/integrations/google-lead.php',
+    '/api/integrations/website-lead.php',
+];
+
+if (in_array($requestPath, $publicIntegrationEndpoints, true)) {
+    require $targetFile;
+    exit;
+}
+
 require_once __DIR__ . '/includes/permission-helper.php';
 require_once __DIR__ . '/includes/Csrf.php';
 

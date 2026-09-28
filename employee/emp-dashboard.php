@@ -3,10 +3,13 @@ include __DIR__ . '/../includes/emp-auth.php';
 include __DIR__ . '/../includes/emp-header.php';
 include __DIR__ . '/../includes/emp-sidebar.php';
 
-// Phase 1 landing page for sales employees. The executive/manager
-// dashboard (my leads, today's follow-ups, pipeline) replaces this in
-// Phase 5. The previous attendance/HR profile widgets were removed with
-// the HRMS modules.
+// Landing page for sales employees. Phase 5 adds a compact "Overview"
+// widget (KPI cards + pipeline chart) using the same dashboard API as the
+// full Lead Dashboard -- api/leads/get-dashboard-summary.php already
+// scopes the data to this employee's own leads unless they have
+// 'view-all-leads' (Sales Manager), so no role branching is needed here.
+// No filters/date-range UI: always "this month" for a quick glance; the
+// full filterable dashboard (Sales Manager only) is at /emp-lead-dashboard.
 $employeeEngine = new EmployeeInfoEngine($con);
 $currentEmployee = $employeeEngine->getCurrentEmployee() ?? [];
 $employeeName = trim((string)($currentEmployee['fullName'] ?? ''));
@@ -38,6 +41,34 @@ $dashboardLinks = [
         </div>
         <!-- Page Header Close -->
 
+        <!-- ==================== OVERVIEW (this month, own scope) ==================== -->
+        <div class="row row-cols-2 row-cols-md-4 g-3 mb-3" id="empOverviewCards">
+            <div class="col"><div class="card custom-card mb-0"><div class="card-body p-3 d-flex align-items-center gap-3">
+                <i class="ti ti-users fs-24 text-primary"></i>
+                <div><div class="fs-20 fw-semibold" data-ov="totalLeads">—</div><div class="text-muted fs-12">Total Leads</div></div>
+            </div></div></div>
+            <div class="col"><div class="card custom-card mb-0"><div class="card-body p-3 d-flex align-items-center gap-3">
+                <i class="ti ti-calendar-event fs-24 text-warning"></i>
+                <div><div class="fs-20 fw-semibold" data-ov="todayFollowUps">—</div><div class="text-muted fs-12">Today's Follow-ups</div></div>
+            </div></div></div>
+            <div class="col"><div class="card custom-card mb-0"><div class="card-body p-3 d-flex align-items-center gap-3">
+                <i class="ti ti-alert-triangle fs-24 text-danger"></i>
+                <div><div class="fs-20 fw-semibold" data-ov="overdueFollowUps">—</div><div class="text-muted fs-12">Overdue Follow-ups</div></div>
+            </div></div></div>
+            <div class="col"><div class="card custom-card mb-0"><div class="card-body p-3 d-flex align-items-center gap-3">
+                <i class="ti ti-trophy fs-24 text-success"></i>
+                <div><div class="fs-20 fw-semibold" data-ov="convertedLeads">—</div><div class="text-muted fs-12">Converted</div></div>
+            </div></div></div>
+        </div>
+        <div class="row mb-1">
+            <div class="col-xl-12">
+                <div class="card custom-card">
+                    <div class="card-header"><h5 class="card-title mb-0">My Pipeline</h5></div>
+                    <div class="card-body"><div id="empPipelineChart"></div></div>
+                </div>
+            </div>
+        </div>
+
         <div class="row">
             <?php foreach ($dashboardLinks as $link): ?>
                 <?php if (!hasRoutePermission('/' . $link['route'], 'canView')) { continue; } ?>
@@ -62,5 +93,35 @@ $dashboardLinks = [
     </div>
 </div>
 <!-- End::app-content -->
+
+<script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+<script src="<?= ASSET_URL ?>/assets/libs/apexcharts/apexcharts.min.js"></script>
+<script>
+$(function () {
+    var now = new Date();
+    var first = new Date(now.getFullYear(), now.getMonth(), 1);
+    var last = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+    var ymd = function (d) { return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); };
+
+    $.getJSON(API_BASE + '/leads/get-dashboard-summary.php', { dateFrom: ymd(first), dateTo: ymd(last) }, function (res) {
+        if (!res.success) return;
+        var s = res.data.summary || {};
+        $('#empOverviewCards [data-ov="totalLeads"]').text(s.totalLeads ?? 0);
+        $('#empOverviewCards [data-ov="todayFollowUps"]').text(s.todayFollowUps ?? 0);
+        $('#empOverviewCards [data-ov="overdueFollowUps"]').text(s.overdueFollowUps ?? 0);
+        $('#empOverviewCards [data-ov="convertedLeads"]').text(s.convertedLeads ?? 0);
+
+        var rows = res.data.statusDistribution || [];
+        var labels = rows.map(function (r) { return String(r.status || '').replace(/_/g, ' ').replace(/\b\w/g, function (c) { return c.toUpperCase(); }); });
+        new ApexCharts(document.querySelector('#empPipelineChart'), {
+            series: [{ name: 'Leads', data: rows.map(function (r) { return r.count; }) }],
+            chart: { type: 'bar', height: 260, toolbar: { show: false } },
+            plotOptions: { bar: { borderRadius: 4, columnWidth: '45%' } },
+            dataLabels: { enabled: true },
+            xaxis: { categories: labels },
+        }).render();
+    });
+});
+</script>
 
 <?php include __DIR__ . '/../includes/emp-footer.php';

@@ -2,11 +2,7 @@
 include __DIR__ . '/../includes/auth.php';
 require_once __DIR__ . '/../includes/db.php';
 
-// Body shared with pages/dashboard.php and employee/emp-lead-dashboard.php.
-$ldHomeUrl = 'dashboard';
-$ldLeadsUrl = 'leads';
-
 include __DIR__ . '/../includes/header.php';
 include __DIR__ . '/../includes/sidebar.php';
-include __DIR__ . '/../includes/lead-dashboard-page.php';
+include __DIR__ . '/../includes/integrations-page.php';
 include __DIR__ . '/../includes/footer.php';

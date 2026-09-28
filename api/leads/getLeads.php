@@ -11,6 +11,8 @@ requireLeadPermission('canView');
 
 $status = trim((string)($_GET['status'] ?? ''));
 $employeeFilter = trim((string)($_GET['employeeId'] ?? ''));
+$projectFilter = (int)($_GET['projectId'] ?? 0);
+$sourceFilter = (int)($_GET['sourceId'] ?? 0);
 $dateFrom = trim((string)($_GET['dateFrom'] ?? ''));
 $dateTo = trim((string)($_GET['dateTo'] ?? ''));
 
@@ -51,6 +53,18 @@ if ($status !== '') {
     $types .= 's';
 }
 
+if ($projectFilter > 0) {
+    $where[] = 'l.projectId = ?';
+    $params[] = $projectFilter;
+    $types .= 'i';
+}
+
+if ($sourceFilter > 0) {
+    $where[] = 'l.sourceId = ?';
+    $params[] = $sourceFilter;
+    $types .= 'i';
+}
+
 if ($dateFrom !== '') {
     $where[] = 'DATE(l.createdAt) >= ?';
     $params[] = $dateFrom;
@@ -76,7 +90,10 @@ $stmt = mysqli_prepare(
         (SELECT IF(f.dueTime IS NULL, f.dueDate, CONCAT(f.dueDate, ' ', f.dueTime))
          FROM leadFollowUps f
          WHERE f.leadId = l.id AND f.status = 'Pending'
-         ORDER BY f.dueDate ASC, f.dueTime ASC LIMIT 1) AS nextFollowUp
+         ORDER BY f.dueDate ASC, f.dueTime ASC LIMIT 1) AS nextFollowUp,
+        (SELECT sr.remark FROM leadStatusRemarks sr
+         WHERE sr.leadId = l.id AND sr.status = l.status
+         ORDER BY sr.id DESC LIMIT 1) AS reason
      FROM leads l
      LEFT JOIN projects p ON p.id = l.projectId
      LEFT JOIN leadSources s ON s.id = l.sourceId
