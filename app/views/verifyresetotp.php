@@ -27,9 +27,9 @@ $base = ASSET_URL . '/';
     <meta charset="UTF-8">
     <meta name='viewport' content='width=device-width, initial-scale=1.0'>
     <meta http-equiv="X-UA-Compatible" content="IE=edge">
-   <title>Reset Password | Modlus HRMS </title>
+   <title>Reset Password - <?= htmlspecialchars(BRAND_NAME, ENT_QUOTES, 'UTF-8') ?></title>
     <meta name="Description" content="Bootstrap Responsive Admin Web Dashboard HTML5 Template">
-    <meta name="Author" content="Modlus Technologies Private Limited">
+    <meta name="Author" content="<?= htmlspecialchars(BRAND_NAME, ENT_QUOTES, 'UTF-8') ?>">
 <meta name="keywords" content="dashboard template,dashboard html,bootstrap admin,dashboard admin,admin template,sales dashboard,crypto dashboard,projects dashboard,html template,html,html css,admin dashboard template,html css bootstrap,dashboard html css,pos system,bootstrap dashboard">
     <!-- Favicon -->
     <link rel="icon" href="<?= $base ?>assets/images/brand-logos/favicon.ico" type="image/x-icon">
@@ -151,7 +151,7 @@ $base = ASSET_URL . '/';
                         <form
                             method="POST"
                             action=""
-                            id="verifyOtpForm">
+                            id="verifyOtpForm"><?php require_once __DIR__ . '/../../includes/Csrf.php'; echo getCsrfInput(); ?>
 
                             <!-- Hidden Fields -->
                             <input
@@ -220,7 +220,7 @@ $base = ASSET_URL . '/';
                         <form
                             method="POST"
                             action=""
-                            class="text-center">
+                            class="text-center"><?php require_once __DIR__ . '/../../includes/Csrf.php'; echo getCsrfInput(); ?>
 
                             <input
                                 type="hidden"

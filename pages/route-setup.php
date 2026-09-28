@@ -591,7 +591,7 @@ include __DIR__ . '/../includes/sidebar.php';
                         </div>
                     </div>
                     <div class="card-body">
-                        <form method="post">
+                        <form method="post"><?php require_once __DIR__ . '/../includes/Csrf.php'; echo getCsrfInput(); ?>
                             <input type="hidden" name="action" value="save">
                             <input type="hidden" name="routeId" value="<?= (int)$formRoute['id']; ?>">
 
@@ -752,7 +752,7 @@ include __DIR__ . '/../includes/sidebar.php';
                                 Normal Add, Edit, Delete and Approve operations need no registration: grant them with the page checkboxes in Permission Setup and check them in the API with requireApiPermission(). Register a Special Action only for an operation that needs its own permission (for example Import Leads or Assign Asset).
                             </div>
 
-                            <form method="post" action="<?= BASE_URL; ?>/route-setup?edit=<?= (int)$editingRoute['id']; ?>">
+                            <form method="post" action="<?= BASE_URL; ?>/route-setup?edit=<?= (int)$editingRoute['id']; ?>"><?php require_once __DIR__ . '/../includes/Csrf.php'; echo getCsrfInput(); ?>
                                 <input type="hidden" name="action" value="savePermissionAction">
                                 <input type="hidden" name="routeId" value="<?= (int)$editingRoute['id']; ?>">
                                 <input type="hidden" name="permissionActionId" value="<?= (int)$formPermissionAction['id']; ?>">
@@ -839,7 +839,7 @@ include __DIR__ . '/../includes/sidebar.php';
                                             name="apiEndpoint"
                                             class="form-control"
                                             value="<?= htmlspecialchars((string)($formPermissionAction['apiEndpoint'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>"
-                                            placeholder="Example: /api/overtime/emp-addOvertime.php"
+                                            placeholder="Example: /api/leads/deleteLead.php"
                                         >
                                         <div class="form-text">When configured, the central gateway protects this endpoint automatically.</div>
                                     </div>

@@ -1,0 +1,14 @@
+# CRM uploads (lead documents, company logo, future project documents).
+# Never execute anything here as PHP, whatever extension a file ends up with,
+# and never list directories. Uploaded files must still be validated
+# (finfo MIME + allow-list + generated names) by the upload endpoint.
+Options -Indexes
+<IfModule mod_php.c>
+    php_flag engine off
+</IfModule>
+<FilesMatch "\.(ph(p[3-8]?|t|tml|ar)|phps|cgi|pl|py|sh)$">
+    Require all denied
+</FilesMatch>
+<IfModule mod_headers.c>
+    Header set X-Content-Type-Options "nosniff"
+</IfModule>

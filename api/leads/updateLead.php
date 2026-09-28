@@ -3,529 +3,115 @@
 header('Content-Type: application/json');
 
 require_once __DIR__ . '/../../includes/db.php';
-require_once __DIR__ . '/../../includes/leadActivityLogger.php';
-
-if (session_status() !== PHP_SESSION_ACTIVE) {
-    session_start();
-}
+require_once __DIR__ . '/../../includes/leadAccess.php';
 
 /*
 |--------------------------------------------------------------------------
-| Authentication
+| Edit lead details
 |--------------------------------------------------------------------------
+| POST (JSON) + CSRF (gateway) + canEdit + lead in scope. Status and
+| assignment have their own endpoints (updateLeadStatus / assignLead) so
+| each change is validated and logged on its own.
 */
-if (
-    empty($_SESSION['candidateId']) &&
-    empty($_SESSION['userId'])
-) {
+requireLeadPost();
+requireLeadPermission('canEdit');
 
-    http_response_code(401);
-
-    echo json_encode([
-        'success' => false,
-        'message' => 'Unauthorized access.'
-    ]);
-
-    exit();
-}
-
-/*
-|--------------------------------------------------------------------------
-| Request Method
-|--------------------------------------------------------------------------
-*/
-if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-
-    http_response_code(405);
-
-    echo json_encode([
-        'success' => false,
-        'message' => 'Method not allowed.'
-    ]);
-
-    exit();
-}
-
-/*
-|--------------------------------------------------------------------------
-| Payload
-|--------------------------------------------------------------------------
-*/
-$rawInput = file_get_contents('php://input');
-
-$payload = json_decode(
-    (string)$rawInput,
-    true
-);
-
+$payload = json_decode((string)file_get_contents('php://input'), true);
 if (!is_array($payload)) {
     $payload = $_POST;
 }
 
-/*
-|--------------------------------------------------------------------------
-| Inputs
-|--------------------------------------------------------------------------
-*/
-$id = (int)(
-    $payload['id'] ?? 0
-);
+$id = (int)($payload['id'] ?? 0);
+requireLeadAccess($con, $id);
 
-$fullName = trim(
-    (string)($payload['fullName'] ?? '')
-);
-
-$email = trim(
-    (string)($payload['email'] ?? '')
-);
-
-$phone = trim(
-    (string)($payload['phone'] ?? '')
-);
-
-$country = trim(
-    (string)($payload['country'] ?? '')
-);
-
-$countryCode = trim(
-    (string)($payload['countryCode'] ?? '')
-);
-
-$source = trim(
-    (string)($payload['source'] ?? '')
-);
-
-
-$orgName = trim(
-    (string)($payload['orgName'] ?? '')
-);
-
-$categoryId = (int)(
-    $payload['categoryId'] ?? 0
-);
-
-$planId = (int)(
-    $payload['planId'] ?? 0
-);
-
-/*
-|--------------------------------------------------------------------------
-| Validation
-|--------------------------------------------------------------------------
-*/
-if (
-    $id <= 0
-    || $fullName === ''
-    || $email === ''
-    || $phone === ''
-    || $country === ''
-    || $countryCode === ''
-    || $source === ''
-    || $orgName === ''
-    || $categoryId <= 0
-    || $planId <= 0
-) {
-
-    http_response_code(422);
-
-    echo json_encode([
-        'success' => false,
-        'message' => 'All fields are required, including country and contact number.'
-    ]);
-
-    exit();
-}
-
-if (
-    !filter_var(
-        $email,
-        FILTER_VALIDATE_EMAIL
-    )
-) {
-
-    http_response_code(422);
-
-    echo json_encode([
-        'success' => false,
-        'message' => 'Please enter a valid email address.'
-    ]);
-
-    exit();
-}
-
-if (!preg_match('/^\+\d{1,4}$/', $countryCode)) {
-
-    http_response_code(422);
-
-    echo json_encode([
-        'success' => false,
-        'message' => 'Please select a valid country.'
-    ]);
-
-    exit();
-}
-
-if (!preg_match('/^[0-9]{6,15}$/', $phone)) {
-
-    http_response_code(422);
-
-    echo json_encode([
-        'success' => false,
-        'message' => 'Please enter a valid contact number.'
-    ]);
-
-    exit();
-}
-
-
-/*
-|--------------------------------------------------------------------------
-| Fetch Old Lead Data For Activity Log
-|--------------------------------------------------------------------------
-*/
-
-$oldStmt = mysqli_prepare(
+$stmt = mysqli_prepare(
     $con,
-    "
-    SELECT
-        l.fullName,
-        l.email,
-        l.phone,
-        l.country,
-        l.countryCode,
-        l.source,
-        l.orgName,
-        l.categoryId,
-        l.planId,
-        c.categoryName,
-        p.planName
-    FROM leads l
-    LEFT JOIN leadCategories c ON c.id = l.categoryId
-    LEFT JOIN leadPlans p ON p.id = l.planId
-    WHERE l.id = ?
-    LIMIT 1
-    "
+    'SELECT l.fullName, l.email, l.phone, l.country, l.countryCode, l.projectId, l.sourceId, p.projectName, s.sourceName
+     FROM leads l LEFT JOIN projects p ON p.id = l.projectId LEFT JOIN leadSources s ON s.id = l.sourceId
+     WHERE l.id = ?'
 );
+mysqli_stmt_bind_param($stmt, 'i', $id);
+mysqli_stmt_execute($stmt);
+$old = mysqli_fetch_assoc(mysqli_stmt_get_result($stmt));
+mysqli_stmt_close($stmt);
 
+$fullName = trim((string)($payload['fullName'] ?? ''));
+$email = trim((string)($payload['email'] ?? ''));
+$phone = preg_replace('/\D/', '', (string)($payload['phone'] ?? '')) ?? '';
+$country = trim((string)($payload['country'] ?? ''));
+$countryCode = trim((string)($payload['countryCode'] ?? ''));
 
-$oldLead = null;
-
-
-if ($oldStmt) {
-
-
-    mysqli_stmt_bind_param(
-        $oldStmt,
-        "i",
-        $id
-    );
-
-
-    mysqli_stmt_execute(
-        $oldStmt
-    );
-
-
-    $oldResult =
-        mysqli_stmt_get_result(
-            $oldStmt
-        );
-
-
-    $oldLead =
-        mysqli_fetch_assoc(
-            $oldResult
-        );
-
-
-    mysqli_stmt_close(
-        $oldStmt
-    );
-
+if ($fullName === '' || mb_strlen($fullName) > 100) {
+    leadJsonExit(422, 'Customer name is required (max 100 characters).');
 }
 
+if (strlen($phone) < 6 || strlen($phone) > 15) {
+    leadJsonExit(422, 'Enter a valid contact number (6-15 digits).');
+}
 
+if ($country === '' || !preg_match('/^\+\d{1,4}$/', $countryCode)) {
+    leadJsonExit(422, 'Select a valid country.');
+}
 
-/*
-|--------------------------------------------------------------------------
-| Update Lead
-|--------------------------------------------------------------------------
-*/
-$updateStmt = mysqli_prepare(
+if ($email !== '' && (!filter_var($email, FILTER_VALIDATE_EMAIL) || mb_strlen($email) > 150)) {
+    leadJsonExit(422, 'Enter a valid email address.');
+}
+
+$source = resolveLeadSource($con, (int)($payload['sourceId'] ?? 0));
+$project = resolveLeadProject($con, (int)($payload['projectId'] ?? 0), true, (int)($old['projectId'] ?? 0));
+
+$dupStmt = mysqli_prepare($con, 'SELECT id FROM leads WHERE phone = ? AND countryCode = ? AND id <> ? LIMIT 1');
+mysqli_stmt_bind_param($dupStmt, 'ssi', $phone, $countryCode, $id);
+mysqli_stmt_execute($dupStmt);
+$duplicate = mysqli_fetch_assoc(mysqli_stmt_get_result($dupStmt));
+mysqli_stmt_close($dupStmt);
+
+if ($duplicate) {
+    leadJsonExit(409, 'Another lead already uses this contact number.');
+}
+
+$emailValue = $email !== '' ? $email : null;
+$projectId = $project['id'] ?? null;
+
+$stmt = mysqli_prepare(
     $con,
-    "
-    UPDATE leads
-    SET
-        fullName = ?,
-        email = ?,
-        phone = ?,
-        country = ?,
-        countryCode = ?,
-        source = ?,
-        orgName = ?,
-        categoryId = ?,
-        planId = ?
-    WHERE id = ?
-    "
+    'UPDATE leads SET fullName = ?, email = ?, phone = ?, country = ?, countryCode = ?, projectId = ?, sourceId = ? WHERE id = ?'
 );
+mysqli_stmt_bind_param($stmt, 'sssssiii', $fullName, $emailValue, $phone, $country, $countryCode, $projectId, $source['id'], $id);
 
-if (!$updateStmt) {
-
-    http_response_code(500);
-
-    echo json_encode([
-        'success' => false,
-        'message' => 'Failed to update lead.'
-    ]);
-
-    exit();
+if (!mysqli_stmt_execute($stmt)) {
+    error_log('updateLead failed: ' . mysqli_stmt_error($stmt));
+    leadJsonExit(500, 'Failed to update lead.');
 }
+mysqli_stmt_close($stmt);
 
-mysqli_stmt_bind_param(
-    $updateStmt,
-    'sssssssiii',
-    $fullName,
-    $email,
-    $phone,
-    $country,
-    $countryCode,
-    $source,
-    $orgName,
-    $categoryId,
-    $planId,
-    $id
-);
-
-$updated = mysqli_stmt_execute(
-    $updateStmt
-);
-
-mysqli_stmt_close(
-    $updateStmt
-);
-
-if (!$updated) {
-
-    http_response_code(500);
-
-    echo json_encode([
-        'success' => false,
-        'message' => 'Failed to update lead.'
-    ]);
-
-    exit();
-}
-
-/*
-|--------------------------------------------------------------------------
-| Fetch Updated Lead
-|--------------------------------------------------------------------------
-*/
-$selectStmt = mysqli_prepare(
-    $con,
-    "
-        SELECT
-    
-        l.id,
-        l.fullName,
-        l.email,
-        l.phone,
-        l.country,
-        l.countryCode,
-        l.source,
-        l.orgName,
-        l.categoryId,
-        l.planId,
-        l.status,
-        l.createdAt,
-        l.createdByCandidateId,
-    
-        c.categoryName,
-        p.planName,
-    
-        eu.fullName AS employeeName
-    
-    FROM leads l
-    
-    LEFT JOIN leadCategories c
-        ON c.id = l.categoryId
-    
-    LEFT JOIN leadPlans p
-        ON p.id = l.planId
-    
-    LEFT JOIN employeeusers eu
-        ON eu.candidateRecordId = l.createdByCandidateId
-    
-    WHERE l.id = ?
-    
-    LIMIT 1
-    "
-);
-
-if (!$selectStmt) {
-
-    http_response_code(500);
-
-    echo json_encode([
-        'success' => false,
-        'message' => 'Lead updated, but failed to load lead details.'
-    ]);
-
-    exit();
-}
-
-mysqli_stmt_bind_param(
-    $selectStmt,
-    'i',
-    $id
-);
-
-mysqli_stmt_execute(
-    $selectStmt
-);
-
-$result = mysqli_stmt_get_result(
-    $selectStmt
-);
-
-$lead = $result
-    ? mysqli_fetch_assoc($result)
-    : null;
-
-mysqli_stmt_close(
-    $selectStmt
-);
-
-if (!$lead) {
-
-    http_response_code(500);
-
-    echo json_encode([
-        'success' => false,
-        'message' => 'Lead updated, but failed to load lead details.'
-    ]);
-
-    exit();
-}
-
-
-/*
-|--------------------------------------------------------------------------
-| Activity Logger
-|--------------------------------------------------------------------------
-*/
-$newLeadData = [
-    'fullName' => $fullName,
-    'email' => $email,
-    'phone' => $phone,
-    'country' => $country,
-    'countryCode' => $countryCode,
-    'source' => $source,
-    'orgName' => $orgName,
-    'categoryId' => $categoryId,
-    'planId' => $planId,
+$new = [
+    'fullName' => $fullName, 'email' => $emailValue, 'phone' => $phone, 'country' => $country,
+    'countryCode' => $countryCode, 'project' => $project['projectName'] ?? null, 'source' => $source['sourceName'],
+];
+$before = [
+    'fullName' => $old['fullName'], 'email' => $old['email'], 'phone' => $old['phone'], 'country' => $old['country'],
+    'countryCode' => $old['countryCode'], 'project' => $old['projectName'], 'source' => $old['sourceName'],
 ];
 
-$oldChanges = [];
-$newChanges = [];
-
-foreach ($newLeadData as $field => $newValue) {
-    $oldValue = $oldLead[$field] ?? null;
-
-    if ((string)$oldValue !== (string)$newValue) {
-        $oldChanges[$field] = $oldValue;
-        $newChanges[$field] = $newValue;
-    }
+if ($before !== $new) {
+    saveActivityLog($con, 'Lead', $id, 'UPDATE', 'Lead details updated : ' . $fullName, $before, $new);
 }
 
-if (array_key_exists('categoryId', $newChanges)) {
-    unset($oldChanges['categoryId'], $newChanges['categoryId']);
-    $oldChanges['category'] = $oldLead['categoryName'] ?? null;
-    $newChanges['category'] = $lead['categoryName'] ?? null;
-}
-
-if (array_key_exists('planId', $newChanges)) {
-    unset($oldChanges['planId'], $newChanges['planId']);
-    $oldChanges['plan'] = $oldLead['planName'] ?? null;
-    $newChanges['plan'] = $lead['planName'] ?? null;
-}
-
-if ($newChanges !== []) {
+if ($before['project'] !== $new['project']) {
     saveActivityLog(
         $con,
         'Lead',
         $id,
-        'UPDATE',
-        'Lead updated : ' . $fullName,
-        $oldChanges,
-        $newChanges
+        'PROJECT',
+        sprintf('Project changed from "%s" to "%s"', $before['project'] ?? 'None', $new['project'] ?? 'None'),
+        ['project' => $before['project']],
+        ['project' => $new['project']]
     );
 }
-/*
-|--------------------------------------------------------------------------
-| Success Response
-|--------------------------------------------------------------------------
-*/
+
 echo json_encode([
-
     'success' => true,
-
-    'message' => 'Lead updated successfully',
-
-    'data' => [
-
-        'id' =>
-            (int)$lead['id'],
-
-        'fullName' =>
-            $lead['fullName'],
-
-        'email' =>
-            $lead['email'],
-
-        'phone' =>
-            $lead['phone'],
-
-        'country' =>
-            $lead['country'],
-
-        'countryCode' =>
-            $lead['countryCode'],
-
-        'source' =>
-            $lead['source'],
-            
-        'orgName' =>
-            $lead['orgName'],
-
-        'categoryId' =>
-            (int)$lead['categoryId'],
-
-        'planId' =>
-            (int)$lead['planId'],
-
-        'categoryName' =>
-            $lead['categoryName'] ?? '',
-
-        'planName' =>
-            $lead['planName'] ?? '',
-            
-        'createdByCandidateId' =>
-            (int)($lead['createdByCandidateId'] ?? 0),
-        
-        'employeeName' =>
-            $lead['employeeName'] ?? '',
-
-        'status' =>
-            $lead['status'],
-
-        'createdDate' =>
-            date(
-                'd M Y h:i A',
-                strtotime(
-                    (string)$lead['createdAt']
-                )
-            )
-    ]
+    'message' => 'Lead updated successfully.',
+    'data' => ['id' => $id],
 ]);
-?>

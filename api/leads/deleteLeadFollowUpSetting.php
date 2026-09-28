@@ -4,6 +4,10 @@ header('Content-Type: application/json');
 
 require_once __DIR__ . '/../../includes/db.php';
 require_once __DIR__ . '/../../includes/leadFollowUpEngine.php';
+require_once __DIR__ . '/../../includes/leadAccess.php';
+
+requireLeadPost();
+requireApiPermission(['/lead-follow-up-setup', '/lead-setup'], 'canDelete');
 
 if (session_status() !== PHP_SESSION_ACTIVE) {
     session_start();

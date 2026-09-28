@@ -21,7 +21,7 @@ $emailValue =
 
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Candidate Forgot Password - Modlus</title>
+    <title>Forgot Password - <?= htmlspecialchars(BRAND_NAME, ENT_QUOTES, 'UTF-8') ?></title>
 
     <link rel="icon" href="<?= $base ?>assets/images/brand-logos/favicon.ico">
 
@@ -101,7 +101,7 @@ $emailValue =
                         <!-- Forgot Password Form -->
                         <form
                             method="POST"
-                            action="">
+                            action=""><?php require_once __DIR__ . '/../../includes/Csrf.php'; echo getCsrfInput(); ?>
 
                             <div class="row gy-3">
 

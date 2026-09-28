@@ -4,6 +4,10 @@ header('Content-Type: application/json');
 
 require_once __DIR__ . '/../../includes/db.php';
 require_once __DIR__ . '/../../includes/leadDashboardEngine.php';
+require_once __DIR__ . '/../../includes/leadAccess.php';
+
+requireApiPermission(['/lead-dashboard', '/emp-lead-dashboard'], 'canView');
+$scopeEmployeeId = getLeadScopeEmployeeId();
 
 if (session_status() !== PHP_SESSION_ACTIVE) {
     session_start();
@@ -21,7 +25,10 @@ try {
     echo json_encode([
         'success' => true,
         'data' => [
-            'employees' => $engine->getAssignedEmployees(),
+            // Restricted users see only themselves in the employee filter.
+            'employees' => $scopeEmployeeId === 0
+                ? $engine->getAssignedEmployees()
+                : array_values(array_filter($engine->getAssignedEmployees(), static fn($employee) => (int)$employee['id'] === $scopeEmployeeId)),
             'sources' => $engine->getSources(),
         ],
     ]);

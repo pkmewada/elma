@@ -65,6 +65,40 @@ if (!$route) {
 
 /*
 |--------------------------------------------------------------------------
+| CSRF for page form posts
+|--------------------------------------------------------------------------
+| Every POST to a routed page (login, OTP, password reset, setup and
+| permission pages) must carry the session token: a csrfToken form field
+| (getCsrfInput()) or the X-CSRF-Token header (layout CSRF shim). Guests
+| have a session too, so login forms are covered.
+*/
+if (strtoupper((string)($_SERVER['REQUEST_METHOD'] ?? 'GET')) === 'POST') {
+    require_once __DIR__ . '/includes/Csrf.php';
+
+    $postedCsrfToken = $_SERVER['HTTP_X_CSRF_TOKEN'] ?? ($_POST['csrfToken'] ?? null);
+
+    if (!validateCsrfToken(is_string($postedCsrfToken) ? $postedCsrfToken : null)) {
+        http_response_code(403);
+
+        $wantsJson = stripos((string)($_SERVER['HTTP_ACCEPT'] ?? ''), 'application/json') !== false
+            || strtolower((string)($_SERVER['HTTP_X_REQUESTED_WITH'] ?? '')) === 'xmlhttprequest';
+
+        if ($wantsJson) {
+            header('Content-Type: application/json');
+            echo json_encode(['success' => false, 'message' => 'Your session could not be verified. Please refresh the page and try again.']);
+        } else {
+            $backUrl = htmlspecialchars(BASE_URL . $path, ENT_QUOTES, 'UTF-8');
+            echo '<!doctype html><meta charset="utf-8"><title>Session expired</title>'
+                . '<p style="font-family:sans-serif;margin:40px">Your session expired or the form was already used. '
+                . '<a href="' . $backUrl . '">Reload the page</a> and try again.</p>';
+        }
+
+        exit();
+    }
+}
+
+/*
+|--------------------------------------------------------------------------
 | Authentication + Permission Guard
 |--------------------------------------------------------------------------
 */

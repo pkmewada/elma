@@ -13,6 +13,32 @@ $(function () {
     var rangeFp = null;
     var charts = { trend: null, status: null, followUp: null, employee: null };
 
+    // ApexCharts cannot parse CSS custom properties ('var(--primary-color)',
+    // 'rgb(var(--success-rgb))') when it derives shades, and throws. Resolve
+    // theme colours to concrete rgb() values right before each chart is built.
+    function themeColor(value) {
+        if (typeof value !== 'string' || value.indexOf('var(') === -1) {
+            return value;
+        }
+        var probe = document.createElement('span');
+        probe.style.color = value;
+        probe.style.display = 'none';
+        document.body.appendChild(probe);
+        var resolved = getComputedStyle(probe).color;
+        probe.remove();
+        return resolved || '#845adf';
+    }
+
+    function resolveChartColors(options) {
+        if (Array.isArray(options.colors)) {
+            options.colors = options.colors.map(themeColor);
+        }
+        if (options.grid && options.grid.borderColor) {
+            options.grid.borderColor = themeColor(options.grid.borderColor);
+        }
+        return options;
+    }
+
     var state = {
         rangeType: 'this_month',
         customFrom: null,
@@ -155,7 +181,7 @@ $(function () {
         };
 
         if (!charts.trend) {
-            charts.trend = new ApexCharts(document.querySelector('#ldLeadTrendChart'), options);
+            charts.trend = new ApexCharts(document.querySelector('#ldLeadTrendChart'), resolveChartColors(options));
             charts.trend.render();
         } else {
             charts.trend.updateOptions(options);
@@ -176,7 +202,7 @@ $(function () {
         };
 
         if (!charts.status) {
-            charts.status = new ApexCharts(document.querySelector('#ldStatusChart'), options);
+            charts.status = new ApexCharts(document.querySelector('#ldStatusChart'), resolveChartColors(options));
             charts.status.render();
         } else {
             charts.status.updateOptions(options);
@@ -205,7 +231,7 @@ $(function () {
         };
 
         if (!charts.followUp) {
-            charts.followUp = new ApexCharts(document.querySelector('#ldFollowUpChart'), options);
+            charts.followUp = new ApexCharts(document.querySelector('#ldFollowUpChart'), resolveChartColors(options));
             charts.followUp.render();
         } else {
             charts.followUp.updateOptions(options);
@@ -243,7 +269,7 @@ $(function () {
         };
 
         if (!charts.employee) {
-            charts.employee = new ApexCharts(document.querySelector('#ldEmployeeChart'), options);
+            charts.employee = new ApexCharts(document.querySelector('#ldEmployeeChart'), resolveChartColors(options));
             charts.employee.render();
         } else {
             charts.employee.updateOptions(options);

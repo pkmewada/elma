@@ -270,7 +270,7 @@ CREATE TABLE IF NOT EXISTS `leadFollowUps` (
   KEY `idx_lfu_lead` (`leadId`),
   KEY `idx_lfu_due` (`dueDate`),
   KEY `idx_lfu_status` (`status`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 CREATE TABLE IF NOT EXISTS `leadFollowUpSettings` (
   `id` int NOT NULL AUTO_INCREMENT,
   `dayNumber` int NOT NULL,
@@ -282,7 +282,7 @@ CREATE TABLE IF NOT EXISTS `leadFollowUpSettings` (
   `updatedAt` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
   KEY `idx_lfus_active` (`isActive`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 CREATE TABLE IF NOT EXISTS `leadDocuments` (
   `id` int unsigned NOT NULL AUTO_INCREMENT,
   `leadId` int NOT NULL,
@@ -352,7 +352,7 @@ CREATE TABLE IF NOT EXISTS `companySettings` (
   `createdAt` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updatedAt` timestamp NULL DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 CREATE TABLE IF NOT EXISTS `eventMailLog` (
   `id` int NOT NULL AUTO_INCREMENT,
   `moduleName` varchar(50) COLLATE utf8mb4_unicode_ci DEFAULT NULL,

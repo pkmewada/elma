@@ -14,9 +14,9 @@ $base = ASSET_URL . '/';
     <meta charset="UTF-8">
     <meta name='viewport' content='width=device-width, initial-scale=1.0'>
     <meta http-equiv="X-UA-Compatible" content="IE=edge">
-    <title> Modlus - Admin Setup </title>
+    <title>Admin Login - <?= htmlspecialchars(BRAND_NAME, ENT_QUOTES, 'UTF-8') ?></title>
     <meta name="Description" content="Bootstrap Responsive Admin Web Dashboard HTML5 Template">
-    <meta name="Author" content="Modlus Technologies Private Limited">
+    <meta name="Author" content="<?= htmlspecialchars(BRAND_NAME, ENT_QUOTES, 'UTF-8') ?>">
 <meta name="keywords" content="dashboard template,dashboard html,bootstrap admin,dashboard admin,admin template,sales dashboard,crypto dashboard,projects dashboard,html template,html,html css,admin dashboard template,html css bootstrap,dashboard html css,pos system,bootstrap dashboard">
     <!-- Favicon -->
     <link rel="icon" href="<?= $base ?>assets/images/brand-logos/favicon.ico" type="image/x-icon">
@@ -52,13 +52,13 @@ $base = ASSET_URL . '/';
                 <div class="card custom-card my-4">
                     <div class="card-body p-5">
                         <p class="h4 mb-2 fw-semibold">Sign In</p>
-                        <p class="mb-4 text-muted fw-normal">Welcome back to Modlus!</p>
+                        <p class="mb-4 text-muted fw-normal">Welcome back to <?= htmlspecialchars(BRAND_NAME, ENT_QUOTES, 'UTF-8') ?>!</p>
                         <?php if ($error !== ''): ?>
                             <div class="alert alert-danger" role="alert">
                                 <?php echo htmlspecialchars($error, ENT_QUOTES, 'UTF-8'); ?>
                             </div>
                         <?php endif; ?>
-                        <form method="post" action="<?= BASE_URL ?>/login">
+                        <form method="post" action="<?= BASE_URL ?>/login"><?php require_once __DIR__ . '/../../includes/Csrf.php'; echo getCsrfInput(); ?>
                             <div class="row gy-3">
                                 <div class="col-xl-12">
                                     <label for="signin-username" class="form-label text-default">Email Address</label>

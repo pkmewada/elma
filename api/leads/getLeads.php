@@ -3,78 +3,45 @@
 header('Content-Type: application/json');
 
 require_once __DIR__ . '/../../includes/db.php';
+require_once __DIR__ . '/../../includes/leadAccess.php';
 
-if (session_status() !== PHP_SESSION_ACTIVE) {
-    session_start();
-}
-
-if (empty($_SESSION['candidateId']) && empty($_SESSION['userId'])) {
-    http_response_code(401);
-    echo json_encode([
-        'success' => false,
-        'message' => 'Unauthorized access.',
-    ]);
-    exit;
-}
-
-$allowedStatuses = [
-    'open',
-    'interested',
-    'connected',
-    'converted',
-    'not_interested',
-    'not_connected',
-];
+// View permission; employees without 'view-all-leads' only get leads
+// assigned to them. Only full-scope users may filter by salesperson.
+requireLeadPermission('canView');
 
 $status = trim((string)($_GET['status'] ?? ''));
-$employeeId = (int)($_GET['employeeId'] ?? 0);
-
-// Optional lead-date range on l.createdAt (the "Date" column of the Leads
-// table), same dateFrom/dateTo naming and DATE() comparison as
-// leadDashboardEngine so a To date includes that whole day.
+$employeeFilter = trim((string)($_GET['employeeId'] ?? ''));
 $dateFrom = trim((string)($_GET['dateFrom'] ?? ''));
 $dateTo = trim((string)($_GET['dateTo'] ?? ''));
 
-if ($status !== '' && !in_array($status, $allowedStatuses, true)) {
-    http_response_code(422);
-    echo json_encode([
-        'success' => false,
-        'message' => 'Invalid lead status filter.',
-    ]);
-    exit;
+if ($status !== '' && !isset(LEAD_STATUSES[$status])) {
+    leadJsonExit(422, 'Invalid lead status filter.');
 }
 
 foreach ([$dateFrom, $dateTo] as $dateValue) {
     if ($dateValue !== '' && !preg_match('/^\d{4}-\d{2}-\d{2}$/', $dateValue)) {
-        http_response_code(422);
-        echo json_encode([
-            'success' => false,
-            'message' => 'Invalid date filter.',
-        ]);
-        exit;
+        leadJsonExit(422, 'Invalid date filter.');
     }
 }
 
 if ($dateFrom !== '' && $dateTo !== '' && $dateFrom > $dateTo) {
-    http_response_code(422);
-    echo json_encode([
-        'success' => false,
-        'message' => 'From Date cannot be after To Date.',
-    ]);
-    exit;
+    leadJsonExit(422, 'From Date cannot be after To Date.');
 }
 
 $where = [];
 $params = [];
 $types = '';
+$scopeEmployeeId = getLeadScopeEmployeeId();
 
-if (!empty($_SESSION['candidateId'])) {
-    $where[] = 'l.createdByCandidateId = ?';
-    $params[] = (int)$_SESSION['candidateId'];
+if ($scopeEmployeeId !== 0) {
+    $where[] = 'l.assignedToId = ?';
+    $params[] = $scopeEmployeeId;
     $types .= 'i';
-} elseif ($employeeId > 0) {
-    $where[] = 'l.createdByCandidateId = ?';
-    $params[] = $employeeId;
+} elseif ($employeeFilter === 'unassigned') {
+    $where[] = 'l.assignedToId IS NULL';
+} elseif ((int)$employeeFilter > 0) {
+    $where[] = 'l.assignedToId = ?';
+    $params[] = (int)$employeeFilter;
     $types .= 'i';
 }
 
@@ -100,36 +67,30 @@ $whereSql = $where ? 'WHERE ' . implode(' AND ', $where) : '';
 
 $stmt = mysqli_prepare(
     $con,
-    "
-    SELECT
-        l.*,
-        c.categoryName,
-        p.planName,
-        u.fullName AS employeeName
-    FROM leads l
-    LEFT JOIN leadCategories c ON c.id = l.categoryId
-    LEFT JOIN leadPlans p ON p.id = l.planId
-    LEFT JOIN employeeusers u ON u.id = l.createdByCandidateId
-    {$whereSql}
-    ORDER BY l.id DESC
-    "
+    "SELECT
+        l.id, l.fullName, l.email, l.phone, l.country, l.countryCode, l.status,
+        l.projectId, p.projectName,
+        l.sourceId, s.sourceName AS source,
+        l.assignedToId, eu.fullName AS assignedToName,
+        l.createdAt, l.updatedAt,
+        (SELECT IF(f.dueTime IS NULL, f.dueDate, CONCAT(f.dueDate, ' ', f.dueTime))
+         FROM leadFollowUps f
+         WHERE f.leadId = l.id AND f.status = 'Pending'
+         ORDER BY f.dueDate ASC, f.dueTime ASC LIMIT 1) AS nextFollowUp
+     FROM leads l
+     LEFT JOIN projects p ON p.id = l.projectId
+     LEFT JOIN leadSources s ON s.id = l.sourceId
+     LEFT JOIN employeeusers eu ON eu.id = l.assignedToId
+     {$whereSql}
+     ORDER BY l.id DESC"
 );
 
 if (!$stmt) {
-    http_response_code(500);
-    echo json_encode([
-        'success' => false,
-        'message' => 'Unable to load leads.',
-    ]);
-    exit;
+    leadJsonExit(500, 'Unable to load leads.');
 }
 
 if ($types !== '') {
-    $bindParams = [$types];
-    foreach ($params as $key => $value) {
-        $bindParams[] = &$params[$key];
-    }
-    call_user_func_array([$stmt, 'bind_param'], $bindParams);
+    mysqli_stmt_bind_param($stmt, $types, ...$params);
 }
 
 mysqli_stmt_execute($stmt);
@@ -137,6 +98,10 @@ $result = mysqli_stmt_get_result($stmt);
 
 $leads = [];
 while ($row = mysqli_fetch_assoc($result)) {
+    $row['id'] = (int)$row['id'];
+    $row['projectId'] = $row['projectId'] !== null ? (int)$row['projectId'] : null;
+    $row['sourceId'] = $row['sourceId'] !== null ? (int)$row['sourceId'] : null;
+    $row['assignedToId'] = $row['assignedToId'] !== null ? (int)$row['assignedToId'] : null;
     $leads[] = $row;
 }
 

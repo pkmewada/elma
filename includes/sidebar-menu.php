@@ -16,18 +16,22 @@ function getSidebarMenuGroups(string $layoutType): array
     global $con;
 
     $groupDefinitions = [
+        // Real Estate CRM navigation. A group with no active, visible,
+        // permitted routes is not rendered, so Projects / Reports /
+        // Integrations stay hidden until their pages are registered.
         'admin' => [
-            'CRM' => ['category' => 'CRM', 'label' => 'CRM Panel', 'icon' => 'ti ti-layout-dashboard'],
-            'Lead Management' => ['category' => 'LMS', 'label' => 'Lead Management', 'icon' => 'ti ti-user-search'],
-            'HRMS' => ['category' => 'HRMS', 'label' => 'HRMS Panel', 'icon' => 'ti ti-users'],
-            'Setup' => ['category' => 'Setup', 'label' => 'Setup', 'icon' => 'ti ti-settings'],
-            'Social Media' => ['category' => 'Social Media', 'label' => 'Social Media', 'icon' => 'ti ti-world'],
-            'Automation' => ['category' => 'Automation', 'label' => 'Automation', 'icon' => 'ti ti-settings-automation'],
+            'CRM' => ['category' => 'CRM', 'label' => 'Dashboard', 'icon' => 'ti ti-layout-dashboard'],
+            'Lead Management' => ['category' => 'CRM', 'label' => 'Lead Management', 'icon' => 'ti ti-user-search'],
+            'Projects' => ['category' => 'CRM', 'label' => 'Projects', 'icon' => 'ti ti-building'],
+            'Employees' => ['category' => 'CRM', 'label' => 'Employees', 'icon' => 'ti ti-users'],
+            'Reports' => ['category' => 'CRM', 'label' => 'Reports', 'icon' => 'ti ti-report-analytics'],
+            'Integrations' => ['category' => 'CRM', 'label' => 'Integrations', 'icon' => 'ti ti-plug-connected'],
+            'Setup' => ['category' => 'Settings', 'label' => 'Settings', 'icon' => 'ti ti-settings'],
         ],
         'employee' => [
-            'Employee Panel' => ['category' => 'EMPLOYEE', 'label' => 'Employee Panel', 'icon' => 'ti ti-user-circle'],
-            'Lead Management' => ['category' => 'LMS', 'label' => 'Lead Management', 'icon' => 'ti ti-user-search'],
-            'HRMS' => ['category' => 'HRMS', 'label' => 'HRMS Panel', 'icon' => 'ti ti-users'],
+            'Employee Panel' => ['category' => 'CRM', 'label' => 'Dashboard', 'icon' => 'ti ti-layout-dashboard'],
+            'Lead Management' => ['category' => 'CRM', 'label' => 'Lead Management', 'icon' => 'ti ti-user-search'],
+            'Projects' => ['category' => 'CRM', 'label' => 'Projects', 'icon' => 'ti ti-building'],
         ],
     ];
 

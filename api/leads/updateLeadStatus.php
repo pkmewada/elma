@@ -2,387 +2,87 @@
 
 header('Content-Type: application/json');
 
-
 require_once __DIR__ . '/../../includes/db.php';
-require_once __DIR__ . '/../../includes/leadActivityLogger.php';
-
-
-if (session_status() !== PHP_SESSION_ACTIVE) {
-
-    session_start();
-
-}
-
+require_once __DIR__ . '/../../includes/leadAccess.php';
 
 /*
 |--------------------------------------------------------------------------
-| Authentication
+| Change pipeline status
 |--------------------------------------------------------------------------
+| POST (JSON) {id, status, remark?} + CSRF (gateway) + canEdit + lead in
+| scope. Converted / Lost require a remark (reason). The remark is kept in
+| leadStatusRemarks (history) and the change in the activity log.
 */
+requireLeadPost();
+requireLeadPermission('canEdit');
 
-if (
-    empty($_SESSION['candidateId']) &&
-    empty($_SESSION['userId'])
-) {
-
-    http_response_code(401);
-
-    echo json_encode([
-        'success' => false,
-        'message' => 'Unauthorized access.',
-    ]);
-
-    exit();
-
-}
-
-
-/*
-|--------------------------------------------------------------------------
-| Request Method
-|--------------------------------------------------------------------------
-*/
-
-if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-
-
-    http_response_code(405);
-
-
-    echo json_encode([
-        'success' => false,
-        'message' => 'Method not allowed.',
-    ]);
-
-
-    exit();
-
-}
-
-
-/*
-|--------------------------------------------------------------------------
-| Payload
-|--------------------------------------------------------------------------
-*/
-
-
-$rawInput =
-    file_get_contents(
-        'php://input'
-    );
-
-
-$payload =
-    json_decode(
-        (string)$rawInput,
-        true
-    );
-
-
+$payload = json_decode((string)file_get_contents('php://input'), true);
 if (!is_array($payload)) {
-
     $payload = $_POST;
-
 }
 
+$id = (int)($payload['id'] ?? 0);
+$status = trim((string)($payload['status'] ?? ''));
+$remark = trim((string)($payload['remark'] ?? ''));
 
-/*
-|--------------------------------------------------------------------------
-| Inputs
-|--------------------------------------------------------------------------
-*/
+$lead = requireLeadAccess($con, $id);
 
-
-$id =
-    (int)(
-        $payload['id'] ?? 0
-    );
-
-
-$status =
-    trim(
-        (string)(
-            $payload['status'] ?? ''
-        )
-    );
-
-
-$allowedStatuses = [
-
-    'open',
-
-    'interested',
-
-    'connected',
-
-    'converted',
-
-    'not_interested',
-
-    'not_connected'
-
-];
-
-
-
-if (
-    $id <= 0 ||
-    !in_array(
-        $status,
-        $allowedStatuses,
-        true
-    )
-) {
-
-
-    http_response_code(422);
-
-
-    echo json_encode([
-        'success' => false,
-        'message' => 'Invalid status update request.',
-    ]);
-
-
-    exit();
-
+if (!isset(LEAD_STATUSES[$status])) {
+    leadJsonExit(422, 'Invalid lead status.');
 }
 
+if (in_array($status, LEAD_CLOSING_STATUSES, true) && $remark === '') {
+    leadJsonExit(422, 'Please enter a remark / reason for ' . LEAD_STATUSES[$status] . '.');
+}
 
+if (mb_strlen($remark) > 2000) {
+    leadJsonExit(422, 'Remark is too long.');
+}
 
-/*
-|--------------------------------------------------------------------------
-| Fetch Old Status
-|--------------------------------------------------------------------------
-*/
+$oldStatus = (string)$lead['status'];
 
+if ($oldStatus === $status && $remark === '') {
+    echo json_encode(['success' => true, 'message' => 'Status unchanged.', 'data' => ['id' => $id, 'status' => $status]]);
+    exit;
+}
 
-$oldStatus = null;
+mysqli_begin_transaction($con);
 
+try {
+    $stmt = mysqli_prepare($con, 'UPDATE leads SET status = ?, updatedAt = NOW() WHERE id = ?');
+    mysqli_stmt_bind_param($stmt, 'si', $status, $id);
+    mysqli_stmt_execute($stmt);
+    mysqli_stmt_close($stmt);
 
-$oldStmt =
-    mysqli_prepare(
-        $con,
-        "
-        SELECT 
-            status,
-            fullName
+    if ($remark !== '') {
+        $actor = getCurrentActor();
+        $stmt = mysqli_prepare($con, 'INSERT INTO leadStatusRemarks (leadId, status, remark, createdByCandidateId, createdByType) VALUES (?, ?, ?, ?, ?)');
+        mysqli_stmt_bind_param($stmt, 'issis', $id, $status, $remark, $actor['id'], $actor['type']);
+        mysqli_stmt_execute($stmt);
+        mysqli_stmt_close($stmt);
+    }
 
-        FROM leads
-
-        WHERE id = ?
-
-        LIMIT 1
-        "
-    );
-
-
-if ($oldStmt) {
-
-
-    mysqli_stmt_bind_param(
-        $oldStmt,
-        "i",
-        $id
-    );
-
-
-    mysqli_stmt_execute(
-        $oldStmt
-    );
-
-
-    $oldResult =
-        mysqli_stmt_get_result(
-            $oldStmt
+    if ($oldStatus !== $status) {
+        saveActivityLog(
+            $con,
+            'Lead',
+            $id,
+            $status === 'converted' ? 'CONVERTED' : ($status === 'lost' ? 'LOST' : 'STATUS'),
+            sprintf('Status changed from %s to %s : %s', LEAD_STATUSES[$oldStatus] ?? $oldStatus, LEAD_STATUSES[$status], $lead['fullName']),
+            ['status' => $oldStatus],
+            ['status' => $status, 'remark' => $remark !== '' ? $remark : null]
         );
+    }
 
-
-    $oldLead =
-        mysqli_fetch_assoc(
-            $oldResult
-        );
-
-
-    mysqli_stmt_close(
-        $oldStmt
-    );
-
+    mysqli_commit($con);
+} catch (Throwable $e) {
+    mysqli_rollback($con);
+    error_log('updateLeadStatus failed: ' . $e->getMessage());
+    leadJsonExit(500, 'Failed to update lead status.');
 }
-
-
-if (
-    empty($oldLead)
-) {
-
-
-    echo json_encode([
-        'success' => false,
-        'message' => 'Lead not found.'
-    ]);
-
-
-    exit();
-
-}
-
-
-/*
-|--------------------------------------------------------------------------
-| Update Status
-|--------------------------------------------------------------------------
-*/
-
-
-$updateStmt =
-    mysqli_prepare(
-        $con,
-        "
-        UPDATE leads
-
-        SET status = ?
-
-        WHERE id = ?
-        "
-    );
-
-
-
-if (!$updateStmt) {
-
-
-    http_response_code(500);
-
-
-    echo json_encode([
-        'success' => false,
-        'message' => 'Failed to update lead status.',
-    ]);
-
-
-    exit();
-
-}
-
-
-
-mysqli_stmt_bind_param(
-
-    $updateStmt,
-
-    'si',
-
-    $status,
-
-    $id
-
-);
-
-
-
-$updated =
-    mysqli_stmt_execute(
-        $updateStmt
-    );
-
-
-
-mysqli_stmt_close(
-    $updateStmt
-);
-
-
-
-if (!$updated) {
-
-
-    http_response_code(500);
-
-
-    echo json_encode([
-        'success' => false,
-        'message' => 'Failed to update lead status.',
-    ]);
-
-
-    exit();
-
-}
-
-
-
-/*
-|--------------------------------------------------------------------------
-| Activity Logger
-|--------------------------------------------------------------------------
-*/
-
-
-if (
-    $oldLead['status'] !== $status
-) {
-
-
-    saveActivityLog(
-
-        $con,
-
-        "Lead",
-
-        $id,
-
-        "STATUS",
-
-        "Lead status changed",
-
-        [
-
-            "status" =>
-                $oldLead['status']
-
-        ],
-
-        [
-
-            "status" =>
-                $status
-
-        ]
-
-    );
-
-}
-
-
-
-/*
-|--------------------------------------------------------------------------
-| Response
-|--------------------------------------------------------------------------
-*/
-
 
 echo json_encode([
-
     'success' => true,
-
-
-    'message' =>
-        'Status updated successfully',
-
-
-    'data' => [
-
-        'id' =>
-            $id,
-
-
-        'status' =>
-            $status,
-
-    ],
-
+    'message' => 'Lead status updated to ' . LEAD_STATUSES[$status] . '.',
+    'data' => ['id' => $id, 'status' => $status],
 ]);
-
-?>

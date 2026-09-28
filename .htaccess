@@ -8,6 +8,12 @@ RewriteEngine On
 RewriteRule ^includes/ - [F,L]
 RewriteRule ^vendor/ - [F,L]
 
+# Internal folders: runtime config (mail credentials), migrations + CLI
+# scripts, cron jobs, logs, docs and VCS/tooling metadata are never web-served.
+RewriteRule ^(storage|database|cron|logs|docs|node_modules)(/|$) - [F,L]
+RewriteRule (^|/)\.(?!well-known(/|$)) - [F,L]
+RewriteRule ^(composer\.(json|lock)|package(-lock)?\.json|esbuild\.config\.js|[^/]+\.md|[^/]+\.txt)$ - [F,L]
+
 # Page files are only reached through routes.php (route + canView check).
 RewriteRule ^(pages|employee|app)/ - [F,L]
 

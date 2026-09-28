@@ -154,11 +154,19 @@ function isLoggedInUserSuperAdmin(): bool
 
     $email = strtolower(trim((string)($user['email'] ?? '')));
 
-    return in_array($email, [
-        'varun.mqlus@gmail.com',
-        'hr@mqlus.in',
-        'superadmin@mqlus.in'
-    ], true);
+    // Super admins are configured per deployment (comma-separated emails in
+    // CRM_SUPER_ADMIN_EMAILS), never hard-coded. Local dev with nothing
+    // configured treats every admin as super admin so Route Setup is usable.
+    $configuredEmails = array_filter(array_map(
+        static fn($item) => strtolower(trim($item)),
+        explode(',', (string)(crmEnv('CRM_SUPER_ADMIN_EMAILS') ?: ''))
+    ));
+
+    if (!$configuredEmails) {
+        return isCrmLocalEnvironment();
+    }
+
+    return in_array($email, $configuredEmails, true);
 }
 
 function getRouteByPath(string $routePath): ?array

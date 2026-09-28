@@ -2,323 +2,58 @@
 
 header('Content-Type: application/json');
 
-
 require_once __DIR__ . '/../../includes/db.php';
-require_once __DIR__ . '/../../includes/leadActivityLogger.php';
-
-
-
-if (session_status() !== PHP_SESSION_ACTIVE) {
-
-    session_start();
-
-}
-
-
+require_once __DIR__ . '/../../includes/leadAccess.php';
 
 /*
 |--------------------------------------------------------------------------
-| Authentication
+| Add a remark (communication note) and optionally schedule a follow-up
 |--------------------------------------------------------------------------
+| POST {leadId, remark, followUpDateTime?} + CSRF (gateway) + canEdit + lead
+| in scope. Remarks are append-only; a follow-up becomes a manual row in the
+| single follow-up table (leadFollowUps).
 */
+requireLeadPost();
+requireLeadPermission('canEdit');
 
+$leadId = (int)($_POST['leadId'] ?? 0);
+$lead = requireLeadAccess($con, $leadId);
 
-if (
-    empty($_SESSION['candidateId']) &&
-    empty($_SESSION['userId'])
-) {
+$remark = trim((string)($_POST['remark'] ?? ''));
+$followUp = parseFollowUpDateTime((string)($_POST['followUpDateTime'] ?? ''));
 
-
-    http_response_code(401);
-
-
-    echo json_encode([
-        'success' => false,
-        'message' => 'Unauthorized access.'
-    ]);
-
-
-    exit;
-
+if ($remark === '' && !$followUp) {
+    leadJsonExit(422, 'Enter a remark or a follow-up date.');
 }
 
-
-
-/*
-|--------------------------------------------------------------------------
-| Inputs
-|--------------------------------------------------------------------------
-*/
-
-
-$leadId =
-    (int)(
-        $_POST['leadId'] ?? 0
-    );
-
-
-
-$remark =
-    trim(
-        (string)(
-            $_POST['remark'] ?? ''
-        )
-    );
-
-
-
-$followUpDateTime =
-    trim(
-        (string)(
-            $_POST['followUpDateTime'] ?? ''
-        )
-    );
-
-
-
-$createdByCandidateId =
-    !empty($_SESSION['candidateId'])
-        ? (int)$_SESSION['candidateId']
-        : (int)($_SESSION['userId'] ?? 0);
-
-
-
-
-if (
-    $leadId <= 0 ||
-    $remark === ''
-) {
-
-
-    echo json_encode([
-        'success' => false,
-        'message' => 'Remark is required.'
-    ]);
-
-
-    exit;
-
+if (mb_strlen($remark) > 2000) {
+    leadJsonExit(422, 'Remark is too long.');
 }
 
-
-
-/*
-|--------------------------------------------------------------------------
-| Insert Remark
-|--------------------------------------------------------------------------
-*/
-
-
-$stmt =
-    mysqli_prepare(
-        $con,
-        "
-        INSERT INTO leadRemarks
-        (
-            leadId,
-            remark,
-            followUpDateTime,
-            createdByCandidateId
-        )
-        VALUES
-        (
-            ?,
-            ?,
-            ?,
-            ?
-        )
-        "
-    );
-
-
-
-if (!$stmt) {
-
-
-    echo json_encode([
-        'success' => false,
-        'message' => 'Unable to save remark.'
-    ]);
-
-
-    exit;
-
-}
-
-
-
-
-$followUpValue =
-    $followUpDateTime !== ''
-        ? date(
-            'Y-m-d H:i:s',
-            strtotime($followUpDateTime)
-        )
-        : null;
-
-
-
-
-mysqli_stmt_bind_param(
-
-    $stmt,
-
-    "issi",
-
-    $leadId,
-
-    $remark,
-
-    $followUpValue,
-
-    $createdByCandidateId
-
-);
-
-
-
-$success =
-    mysqli_stmt_execute(
-        $stmt
-    );
-
-
-
-$remarkId =
-    mysqli_insert_id(
-        $con
-    );
-
-
-
-mysqli_stmt_close(
-    $stmt
-);
-
-
-
-/*
-|--------------------------------------------------------------------------
-| Activity Logger
-|--------------------------------------------------------------------------
-*/
-
-
-if ($success) {
-
-
-
-    $leadName = "";
-
-
-    $leadStmt =
-        mysqli_prepare(
-            $con,
-            "
-            SELECT fullName
-
-            FROM leads
-
-            WHERE id = ?
-
-            LIMIT 1
-            "
-        );
-
-
-
-    if ($leadStmt) {
-
-
-        mysqli_stmt_bind_param(
-            $leadStmt,
-            "i",
-            $leadId
-        );
-
-
-        mysqli_stmt_execute(
-            $leadStmt
-        );
-
-
-        $leadResult =
-            mysqli_stmt_get_result(
-                $leadStmt
-            );
-
-
-        $lead =
-            mysqli_fetch_assoc(
-                $leadResult
-            );
-
-
-        $leadName =
-            $lead['fullName'] ?? "";
-
-
-        mysqli_stmt_close(
-            $leadStmt
-        );
-
+$remarkId = null;
+$followUpId = null;
+
+mysqli_begin_transaction($con);
+
+try {
+    if ($remark !== '') {
+        $remarkId = createLeadRemark($con, $leadId, $remark);
+        saveActivityLog($con, 'Lead', $leadId, 'REMARK', 'Remark added : ' . $lead['fullName'], null, ['remarkId' => $remarkId, 'remark' => $remark]);
     }
 
+    if ($followUp) {
+        $followUpId = createManualFollowUp($con, $leadId, $followUp[0], $followUp[1], $remark);
+    }
 
-
-    saveActivityLog(
-
-        $con,
-
-        "Lead",
-
-        $leadId,
-
-        "REMARK",
-
-        "Remark added : " . $leadName,
-
-        null,
-
-        [
-
-            "remarkId" =>
-                $remarkId,
-
-
-            "remark" =>
-                $remark,
-
-
-            "followUpDateTime" =>
-                $followUpValue
-
-        ]
-
-    );
-
-
+    mysqli_commit($con);
+} catch (Throwable $e) {
+    mysqli_rollback($con);
+    error_log('saveLeadRemark failed: ' . $e->getMessage());
+    leadJsonExit(500, 'Failed to save remark.');
 }
 
-
-
-/*
-|--------------------------------------------------------------------------
-| Response
-|--------------------------------------------------------------------------
-*/
-
-
 echo json_encode([
-
-    'success' => $success,
-
-
-    'message' =>
-        $success
-            ? 'Remark saved successfully.'
-            : 'Failed to save remark.'
-
+    'success' => true,
+    'message' => $followUp ? 'Saved and follow-up scheduled.' : 'Remark saved.',
+    'data' => ['remarkId' => $remarkId, 'followUpId' => $followUpId],
 ]);
-
-?>

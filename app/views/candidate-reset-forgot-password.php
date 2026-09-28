@@ -25,7 +25,7 @@ $successMessage =
         content="width=device-width, initial-scale=1.0">
 
     <title>
-        Reset Password - Modlus
+        Reset Password - <?= htmlspecialchars(BRAND_NAME, ENT_QUOTES, 'UTF-8') ?>
     </title>
 
     <link
@@ -123,7 +123,7 @@ $successMessage =
                         <!-- Reset Password Form -->
                         <form
                             method="POST"
-                            action="">
+                            action=""><?php require_once __DIR__ . '/../../includes/Csrf.php'; echo getCsrfInput(); ?>
 
                             <div class="row gy-3">
 

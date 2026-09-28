@@ -1,0 +1,15 @@
+{
+    "gmail_username": "",
+    "gmail_app_password": "",
+    "roles": [
+        "Sales Manager",
+        "Sales Executive"
+    ],
+    "departments": [
+        "Sales"
+    ],
+    "deductionTypes": [],
+    "expenseTypes": [],
+    "terms_and_conditions_html": "",
+    "terms_last_updated": ""
+}

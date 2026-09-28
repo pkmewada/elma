@@ -34,7 +34,7 @@ function reqLabel(string $text): string
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Complete Profile - Modlus</title>
+    <title>Complete Profile - <?= htmlspecialchars(BRAND_NAME, ENT_QUOTES, 'UTF-8') ?></title>
 
     <link rel="icon" href="<?= $base ?>assets/images/brand-logos/favicon.ico">
 
@@ -149,7 +149,7 @@ function reqLabel(string $text): string
                             Please upload clear documents only.
                         </div>
 
-                        <form method="post" action="candidate-profile" enctype="multipart/form-data">
+                        <form method="post" action="candidate-profile" enctype="multipart/form-data"><?php require_once __DIR__ . '/../../includes/Csrf.php'; echo getCsrfInput(); ?>
 
                             <div class="row gy-4">
                         

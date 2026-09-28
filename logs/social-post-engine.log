@@ -1,4 +1,0 @@
-[2026-08-28 19:02:55] clientId=1 accountId=9 platform=instagram type=image success=false postId=n/a message=Meta API request failed: SSL certificate problem: unable to get local issuer certificate
-[2026-08-28 19:03:13] clientId=1 accountId=9 platform=instagram type=image success=false postId=n/a message=Meta API request failed: SSL certificate problem: unable to get local issuer certificate
-[2026-08-28 19:36:49] clientId=1 accountId=10 platform=instagram type=image success=false postId=n/a message=Meta API request failed: SSL certificate problem: unable to get local issuer certificate
-[2026-08-28 21:18:24] clientId=1 accountId=16 platform=instagram type=text success=false postId=n/a message=Instagram does not support text-only feed posts.
