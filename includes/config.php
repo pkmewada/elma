@@ -74,8 +74,17 @@ if (!function_exists('isCrmLocalEnvironment')) {
 
 // Separate session cookie so a login on another app on the same host
 // (e.g. Modlus on localhost) is never accepted here, and vice versa.
+// Secure is on for anything not local (production always runs HTTPS);
+// HttpOnly/SameSite=Lax are always on. Must be set before session_start().
 if (session_status() === PHP_SESSION_NONE) {
     session_name('ELMACRMSESSID');
+    session_set_cookie_params([
+        'lifetime' => 0,
+        'path' => '/',
+        'secure' => !isCrmLocalEnvironment(),
+        'httponly' => true,
+        'samesite' => 'Lax',
+    ]);
 }
 
 // Override for any environment (production or otherwise): if set, this wins

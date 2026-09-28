@@ -35,5 +35,6 @@ echo json_encode([
         'meta' => $webhookUrl('meta-webhook.php'),
         'google' => $webhookUrl('google-lead.php'),
         'website' => $webhookUrl('website-lead.php'),
+        'whatsapp' => $webhookUrl('whatsapp-webhook.php'),
     ],
 ]);

@@ -17,7 +17,7 @@
 require_once __DIR__ . '/Crypto.php';
 require_once __DIR__ . '/leadActivityLogger.php';
 
-const INTEGRATION_PROVIDERS = ['meta' => 'Meta Lead Ads', 'google' => 'Google Lead Forms', 'website' => 'Website Lead Capture'];
+const INTEGRATION_PROVIDERS = ['meta' => 'Meta Lead Ads', 'google' => 'Google Lead Forms', 'website' => 'Website Lead Capture', 'whatsapp' => 'WhatsApp Cloud API'];
 
 function integrationJsonExit(int $statusCode, string $message, array $data = []): void
 {

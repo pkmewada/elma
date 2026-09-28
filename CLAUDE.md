@@ -306,6 +306,194 @@ Dashboard/Reports/Leads.
   (`getIntegrationSettings.php` currently reports Meta/Google/Website as configured with test
   values — replace before any real provider is pointed at these endpoints).
 
+**Phase 6.5 (complete, 2026-09-28):** WhatsApp CRM Chat via the official Meta WhatsApp Cloud API —
+1-to-1 chat inside the CRM, so CRM users no longer need WhatsApp Web/Desktop/mobile for normal
+communication. Reuses Phase 6's integration settings/secret/log infrastructure and the Mamix
+theme's own (pre-existing but unused since Phase 1's demo-page cleanup) chat CSS — no new theme,
+no WebSockets, no queue.
+- **Data model**: `whatsappConversations` (leadId nullable, waId unique, phoneNumber, customerName,
+  assignedToId nullable — used only until a conversation is linked to a lead, lastMessageAt/
+  lastMessagePreview/unreadCount) and `whatsappMessages` (conversationId, metaMessageId nullable-
+  unique, direction, messageType, messageText, mediaId/mediaPath, status, errorMessage, sentByType/
+  sentById, sentAt/deliveredAt/readAt). Both additive; no existing table changed except
+  `integrationSettings.provider` ENUM widened to add `'whatsapp'` as a 4th provider (same table,
+  same secret/log pattern as Meta/Google/Website — no second config system).
+- **Conversation access** (`includes/whatsappAccess.php`): reuses `getLeadScopeEmployeeId()`/
+  `canAccessAllLeads()` from `includes/leadAccess.php` directly — no second permission model. A
+  linked conversation's owner is its lead's `assignedToId`; an unlinked conversation's owner is its
+  own `assignedToId` (or nobody, in which case only a full-scope caller — admin / `view-all-leads`
+  — can see it, until it's linked/assigned). Verified: a Sales Executive gets 404 on an unassigned
+  conversation, and gains access the moment its lead is assigned to them.
+- **Inbound flow** (`api/integrations/whatsapp-webhook.php`, public): same Meta webhook mechanism
+  already built for Lead Ads in Phase 6 (`verifyMetaChallenge()`/`verifyMetaSignature()` reused
+  as-is — GET handshake, POST signed with `X-Hub-Signature-256`). Handles two independent event
+  shapes per Meta's docs: `messages[]` (dedup by `metaMessageId`, find-or-create the conversation by
+  `wa_id`, best-effort auto-link to an existing lead by phone via `findLeadByWaId()`, store the
+  message, bump `unreadCount`, log a summary-level `WHATSAPP_RECEIVED` lead activity — never the
+  full message body) and `statuses[]` (updates the matching outbound message's status; a rank check
+  in `whatsappStatusRank()` means an out-of-order/duplicate webhook can never downgrade an
+  already-more-advanced status, e.g. a late `sent` after `delivered` is ignored).
+- **Outbound flow** (`api/whatsapp/send-message.php`, normal CRM session + CSRF +
+  `send_whatsapp_message` special action + `requireConversationAccess()`): inserts the message row
+  as `pending` **before** any Meta API call (media upload included) so a failure at any step still
+  leaves a visible, retryable `failed` row instead of silently vanishing — a real bug caught during
+  testing (the first draft only inserted the row for text/template; a media-upload failure used to
+  exit before ever creating one). On success the row becomes `sent` with the real `metaMessageId`
+  (later advanced to `delivered`/`read` by the webhook); on failure a safe, generic reason is stored
+  (never the raw Meta response/secrets) and logged to `integrationLogs`.
+- **24-hour customer service window**: confirmed via Meta's current docs
+  (developers.facebook.com/docs/whatsapp/cloud-api) before implementing — free-form text/media is
+  only allowed within 24h of the customer's last inbound message (`isConversationWindowOpen()`,
+  computed from `MAX(sentAt) WHERE direction='inbound'`); outside it, `send-message.php` rejects
+  free-form sends with 422 and the chat UI shows a banner requiring a template. Template sends are
+  never blocked by the window (that's their purpose).
+- **Templates**: managed in Meta itself, not by this CRM. An admin lists approved
+  name/language/variable-count/label pairs as plain text in the WhatsApp integration card
+  (`config.templates`, one per line); the composer's template picker and variable-count inputs are
+  driven entirely by that list — no live Meta template-list fetch (no credentials available), and no
+  template-management UI was built (matches the "CRM only needs to load/configure/send" scope).
+- **Media**: image + document, both directions, reusing the existing private-file infrastructure
+  (`includes/privateFiles.php`'s `storePrivateFile()`/`streamPrivateFile()`/type constants — the
+  same code lead/project documents already use) under `storage/whatsapp-media/<conversationId>/`,
+  served back only through `api/whatsapp/media.php` (session + conversation access re-checked, MIME
+  re-verified, never a raw path from the request). Outbound: upload to Meta's `/media` endpoint,
+  then send by media id. Inbound: two-step download (fetch URL, then bytes) via
+  `downloadWhatsappMediaBinary()`; unsupported inbound types (audio/video/sticker/location/etc.) are
+  recorded as metadata-only placeholders, never dropped, never downloaded.
+- **Lead linking** (`api/whatsapp/linkLead.php`, full-scope callers only): a small opt-in action on
+  an unlinked conversation — "Link to Existing Lead" (validates the lead via the existing
+  `requireLeadAccess()`) or "Create Lead" (reuses `createLeadFromSource()` with source `whatsapp`,
+  the pre-existing `leadSources.sourceKey='whatsapp'` row — the CRM already had this source, nothing
+  new to seed). No automatic lead creation from an inbound message; the conversation is simply
+  captured unlinked until someone acts. A wa_id is opportunistically split into the CRM's
+  (countryCode, phone) shape only for the exact `91 + 10 digits` pattern the CRM already defaults to
+  elsewhere (`splitWaIdForLead()`); any other international number is kept as-is, never guessed.
+- **Lead-page WhatsApp action changed** (`dist/assets/js/lead.js`, `includes/lead-page.php`): the
+  button no longer opens `wa.me`; it links to the new `WHATSAPP_CHAT_URL` (`/whatsapp` admin,
+  `/emp-whatsapp` employee — injected per-layout exactly like the existing `FOLLOW_UP_LEADS_URL`
+  pattern) with `?leadId=`, which `getMessages.php` resolves into that lead's conversation
+  (creating it on first use) — reuses the pre-existing `?leadId=` deep-link convention from the
+  Follow-ups page. No message is ever auto-sent; the user still has to type and hit send. The old
+  per-click `logLeadContact.php` "WhatsApp action opened" log entry is gone (superseded by the real
+  message-level `WHATSAPP_SENT`/`WHATSAPP_RECEIVED` activity logging); `call-btn` logging is
+  unchanged.
+- **Chat page** (`/whatsapp` admin, `/emp-whatsapp` employee — `includes/whatsapp-page.php` shared
+  body, `moduleName='Lead Management'`, the group both sidebars already have — zero
+  `sidebar-menu.php` changes): reuses the Mamix theme's own chat CSS classes (`.main-chart-wrapper`,
+  `.chat-info`, `.main-chat-area`, `.chat-content`/`.chat-item-start`/`.chat-item-end`/
+  `.main-chat-msg`, `.chat-footer`, `.responsive-chat-close`) straight from
+  `dist/assets/css/styles.css` — the theme's demo `chat.html` page was deleted in Phase 1's cleanup
+  but its compiled CSS was still present, so no new chat markup/CSS was invented. SimpleBar (already
+  loaded globally) for the scroll panes. `dist/assets/js/whatsapp.js`: conversation list polls every
+  8s, an open conversation's messages poll every 4s (Section 13's documented interval), search +
+  All/Unread/Unlinked filter in a `.crm-filter-bar` row, composer (text/attach/template), window
+  banner, Link/Create Lead modal, Send Template modal. All rendered text (customer name, message
+  body) goes through the same `esc()`/`.text()` escaping pattern as every other CRM list page —
+  verified an inbound `<script>`/`<img onerror>` payload renders inert, never executes.
+- **Permissions/sidebar**: `send_whatsapp_message` special action (one `permissionActions` row per
+  route, `/whatsapp` and `/emp-whatsapp`), granted by default to Sales Executive and Sales Manager
+  (same tier as their existing `/emp-leads` canEdit — the real restriction is conversation
+  ownership, not this action). `/emp-whatsapp` also got the same provisional `rolePermissions`
+  row (canView/canAdd/canEdit) those two roles already have on `/emp-leads`.
+- Migration: `2026-10-01-crm-phase6.5-whatsapp.sql` — `integrationSettings.provider` ENUM widened;
+  `whatsappConversations`/`whatsappMessages` tables; `/whatsapp` + `/emp-whatsapp` routes;
+  provisional role access + `send_whatsapp_message` action. Additive/idempotent, applied twice
+  locally to confirm.
+- **Tests**: full existing regression suite re-run after the `lead.js`/`lead-page.php`/
+  `api-gateway.php` changes — 235/235 passed, no regression. New `sectest-phase6.5.sh` (40 checks:
+  admin-only access, webhook verification/signature/dedup, out-of-order status handling, conversation
+  scope (linked/unlinked/newly-assigned), link/create-lead, send validation (CSRF/empty/oversized/
+  invalid-conversation), the 24h window (text blocked, template allowed), mark-read, XSS escaping,
+  secret-never-exposed, media endpoint access control) — combined suite 275/275 passed. A real bug
+  was caught and fixed during this pass: a failed media-upload-to-Meta used to leave no message row
+  at all; now every send path inserts `pending` first, matching text/template. Browser verification
+  (`run-p65.mjs`) at 1440/1280/390px: 31/31 passed, zero unexpected console/JS/network events (the
+  one 404 for a decorative background SVG and the one 502 from the deliberately-fake test token are
+  expected, not bugs) — conversation list, opening a thread, composer send attempt, template modal,
+  search filtering, XSS-safe rendering, Link/Create Lead action, executive scope restriction, the
+  Leads page's WhatsApp button now opening the CRM chat instead of `wa.me`, filter bar one row at
+  ≥992px / wraps at 390px.
+- **Demo data**: at the user's request, ~10 realistic WhatsApp conversations (varied Indian names/
+  numbers, 3–5 messages each, mixed read/delivered/sent/failed outbound statuses, unread counts, 3
+  linked to freshly-created demo leads across all three pipeline stages/salespeople, 7 unlinked) were
+  seeded via a one-off CLI script for a client walkthrough — not part of the app, not migrated, safe
+  to clear before go-live (`TRUNCATE whatsappMessages; TRUNCATE whatsappConversations;`, and delete
+  the 3 demo leads it created if desired).
+- **Live Meta WhatsApp Cloud API verification status**: **implemented and locally verified** end to
+  end (webhook verify/signature/dedup/status-updates, outbound send reaching a real HTTPS call to
+  `graph.facebook.com` and failing gracefully on an intentionally-fake token, media upload attempt,
+  24h window enforcement, permissions, XSS safety) using a test Phone Number ID/access token — **not
+  live-verified against a real WhatsApp Business phone number**, since no live credentials were
+  available. The request/response shapes (message send, template send, media send, webhook payload)
+  were checked against the current official docs
+  (developers.facebook.com/docs/whatsapp/cloud-api) before implementing, not invented.
+- **Deferred / needs real credentials before go-live**: a live Phone Number ID + access token to
+  verify an actual message reaches a real WhatsApp number and a real inbound webhook fires; a live
+  Meta App Secret/Verify Token for the real webhook subscription; confirming the exact approved
+  template names/variable counts from the client's own Meta Business Manager; deciding whether to
+  keep or clear the demo conversations/leads before go-live.
+
+**Phase 7 (partial — see "requires production access" below, 2026-09-28):** Production hardening,
+deployment prep, and handover documentation. **This phase was worked entirely from the local WAMP
+dev environment — no Hostinger/production server or real provider (Meta/Google/WhatsApp) accounts
+were made available, so everything requiring live server access or live credentials is documented
+as a requirement/checklist item, not claimed as done.** Full deployment/environment/backup/rollback
+detail now lives in [README.md](README.md)'s "Production deployment" section (not duplicated here).
+- **Pre-deployment audit**: `git status`/`git ls-files` checked — only `.env.example` and migration
+  `.sql` files are tracked (both intended); `.env`, `storage/*.json`,
+  `storage/{lead-documents,project-documents,whatsapp-media}/`, `logs/` all confirmed gitignored;
+  no DB dump or `.env` ever appeared in git history. Nothing sensitive is at risk of being committed.
+- **Session cookie hardening** (`includes/config.php`): added `session_set_cookie_params()` —
+  `HttpOnly` + `SameSite=Lax` always, `Secure` whenever `isCrmLocalEnvironment()` is false (i.e.
+  automatically on for the real production domain, off locally so HTTP dev logins keep working).
+  This was a real, minimal gap (Phase 1–6.5 never set these flags, relying on PHP defaults) — the
+  only code change made in Phase 7. Verified: local login still works (cookie now shows `HttpOnly`,
+  `Secure` correctly `false` on `localhost`), and the full regression suite still passes.
+- **`.htaccess` hardening**: re-verified with real HTTP requests, including the Phase 6.5 additions
+  — `storage/whatsapp-media/` blocked (403), `includes/whatsappAccess.php`/`whatsapp-page.php`
+  blocked, `pages/whatsapp.php`/`employee/emp-whatsapp.php` blocked direct, migrations blocked,
+  the WhatsApp webhook reachable without a session (its own 403 is the app's verify-token check,
+  not a gateway block — confirmed by reading the response body), `api/whatsapp/*` correctly 401s
+  without a session. No `.htaccess` changes were needed — Phase 1's rules already cover every new
+  path pattern from later phases.
+- **`uploads/.htaccess` / storage `.htaccess`**: reviewed — already double-guards PHP execution for
+  both `mod_php` and PHP-FPM-style handlers (`Require all denied` on `.ph*`/`.cgi`/`.pl`/`.py`/`.sh`
+  regardless of `mod_php` presence), already correct, no change needed.
+- **Full PHP lint**: all 166 `.php` files in the project — 0 syntax errors.
+- **Full security regression suite**: re-run after the cookie change — 275/275 passed (Phases 2, 3,
+  5, 6, 6.5 all still green). Re-run twice more in this phase for other reasons; each time the
+  WhatsApp demo data was wiped by the suite's own table reset and was **re-seeded immediately after**
+  (see the standing note below — this is a recurring interaction to be aware of, not a bug).
+- **Sidebar review**: queried `routesMaster` directly — admin/employee active+visible routes exactly
+  match the expected module structure (CRM/Lead Management/Projects/Employees/Reports/
+  Integrations/Setup for admin; Employee Panel/Lead Management/Projects for employee); zero active
+  routes with an unrecognized `moduleName`; zero still-active Modlus-origin routes. No changes needed.
+- **JS debug-log sweep**: zero `console.log`/`debugger` statements in any of the CRM's own
+  business-logic JS files (`lead.js`, `lead-dashboard.js`, `reports.js`, `integrations.js`,
+  `whatsapp.js`, `projects.js`, etc). The `console.log` hits found elsewhere are all inside unused
+  Mamix theme demo-page scripts (`blog-details.js`, `ecommerce-*.js`, `tagify.js`, etc.) that no CRM
+  route ever loads — left alone, deleting hundreds of unused vendor files is out of scope here.
+- **PHP limits / file storage permissions / HTTPS / SMTP / provider live verification / backups /
+  restore**: these all require the actual production host and cannot be exercised from this local
+  environment. Target values, exact steps, and a full deployment checklist are documented in
+  [README.md](README.md) rather than invented as "done" here.
+- **Demo data conflict (flagged, not resolved unilaterally)**: this phase's own instructions say to
+  clear WhatsApp demo data before go-live, but the user's immediately preceding request in this same
+  session was to *create* that demo data for a client walkthrough. The demo data (10 conversations,
+  3 linked demo leads) was **left in place** — clearing it was not done without explicit confirmation,
+  since doing so would have silently undone work just requested. It is disposable
+  (`TRUNCATE whatsappMessages; TRUNCATE whatsappConversations;` plus removing the 3 demo leads) and
+  clearly flagged as needing an explicit decision before real production go-live.
+- **README.md**: substantially rewritten — module status table updated (Dashboard/Reports/
+  Integrations/WhatsApp all "Available" now, not "Planned"), full production deployment section
+  added (server prerequisites, PHP limits, DB setup, storage permissions, admin creation, SMTP,
+  legal pages, per-provider go-live steps, backups, restore, rollback, deployment checklist).
+- **Not done in this phase** (all genuinely require the client's/hosting provider's involvement, not
+  more engineering time): creating the actual production database/environment on Hostinger; issuing
+  the production admin account; live Meta/Google/WhatsApp credential setup and end-to-end
+  verification with real accounts; real SMTP delivery test; final legal sign-off on the 3 legal
+  pages; an actual backup/restore exercise (there is no production system yet to back up).
+
 **Historical Phase 1 gaps (fixed in Phase 2/3):**
 - `api/leads/*` and `api/employee/*` (except `addEmployee`), `api/company/*`: no CSRF; lead APIs check session only, not route/action permission; `permissionActions` has no API mappings yet.
 - `deleteLead` / `updateLead` / `updateLeadStatus`: no ownership check.
@@ -313,7 +501,8 @@ Dashboard/Reports/Leads.
 - Lead ownership is `leads.createdByCandidateId` (creator = owner); no assignee column yet.
 - Login forms have no CSRF token.
 
-**Next phases:** 7 testing, deployment.
+**Next phases:** finish Phase 7 once production hosting + real provider credentials are available
+(everything listed above under "Not done in this phase").
 
 ---
 

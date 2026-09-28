@@ -7,6 +7,7 @@ require_once __DIR__ . '/../includes/db.php';
 $leadPageTitle = 'My Leads';
 $leadPageHomeUrl = 'emp-dashboard';
 $leadPageFollowUpUrl = 'emp-follow-ups';
+$leadPageWhatsappUrl = 'emp-whatsapp';
 
 include __DIR__ . '/../includes/emp-header.php';
 include __DIR__ . '/../includes/emp-sidebar.php';

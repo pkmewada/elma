@@ -61,6 +61,7 @@ $publicIntegrationEndpoints = [
     '/api/integrations/meta-webhook.php',
     '/api/integrations/google-lead.php',
     '/api/integrations/website-lead.php',
+    '/api/integrations/whatsapp-webhook.php',
 ];
 
 if (in_array($requestPath, $publicIntegrationEndpoints, true)) {
