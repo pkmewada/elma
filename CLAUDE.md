@@ -613,6 +613,92 @@ send) and documents Meta App Review readiness.
   complete a real send); (4) commit `git rm --cached includes/db.php` when the user is ready (left
   staged, not committed, per instruction not to commit).
 
+**Bug Fix: WhatsApp Inbound Webhook Debug (2026-09-29):**
+
+- **Symptom:** GET verification succeeds, the "messages" field subscription shows active in Meta's
+  dashboard, outbound CRM → WhatsApp sends work, but inbound customer replies never appear in
+  `/whatsapp`'s `getMessages.php`, and — critically — `integrationLogs` has **zero** rows for the
+  webhook at all, not even a rejection/error row.
+- **Root cause: could not be pinned down from this environment alone** — this needs to be diagnosed
+  against the client's live traffic, not this local box (there is no way to make Meta send a real
+  webhook to `localhost`). What this audit *does* establish with certainty, by reading every file in
+  the flow (`api/integrations/whatsapp-webhook.php`, `includes/whatsappAccess.php`,
+  `includes/integrationAccess.php`, the `whatsappMessages`/`integrationLogs` schemas,
+  `api/whatsapp/getMessages.php`, `api-gateway.php`) and by replaying a real signed webhook POST
+  against this local app:
+  - `getMessages.php` has no `direction` filter — it would show inbound messages exactly like
+    outbound ones if any existed in `whatsappMessages`. **Not a read-side bug.**
+  - `api-gateway.php`'s public-endpoint exemption list already includes
+    `/api/integrations/whatsapp-webhook.php` for both GET and POST (same boolean check, not
+    method-specific) — since GET verification is confirmed working, POST requests reach the same
+    file too. **Not a gateway/routing bug.**
+  - A full signed POST with a `messages[]` payload, replayed locally end-to-end, correctly created
+    the conversation, inserted the `whatsappMessages` row (`status='received'`), bumped
+    `unreadCount`, and logged `message_received`/`created`. **The parser and DB insert logic are
+    correct for a `messages[]` payload in the shape Meta currently documents** (dedup by
+    `metaMessageId`, contact-name lookup by `wa_id`, image/document media download — nothing here
+    is broken by itself).
+  - The **real, confirmed gap** this audit found: the file had **no logging path that fires
+    unconditionally on receipt** — every existing `logIntegrationEvent()` call was gated behind a
+    specific rejection condition (bad signature, missing `from`/`id`, duplicate id). If a POST never
+    reaches this file at all (wrong callback URL registered in Meta, a proxy/CDN rule, a different
+    file entirely), or if PHP fatals partway through processing (`db.php` runs with
+    `mysqli_report(MYSQLI_REPORT_OFF)`, so a failed `mysqli_stmt_execute()` on the
+    `whatsappMessages` INSERT was previously **completely silent** — no exception, no warning, no
+    log row, the message just vanishes), the result is indistinguishable from "nothing happened" —
+    exactly the reported symptom of zero log rows.
+  - **Leading hypothesis** (not proven, needs the client's Meta App dashboard or live production
+    logs to confirm): Meta's WhatsApp product has its own separate webhook **Callback URL +
+    Verify Token** configuration (under WhatsApp → Configuration), independent of the App-level
+    "Webhooks" product page used for Lead Ads. It's a common setup mistake to leave the WhatsApp
+    "messages" field subscribed pointing at the *Lead Ads* callback URL (`meta-webhook.php`) left
+    over from initial setup, rather than `whatsapp-webhook.php`. If that's what happened here,
+    inbound WhatsApp messages land on `meta-webhook.php`, which only understands `leadgen_id` —
+    they'd be silently logged as `provider='meta', eventType='lead_event', status='rejected',
+    message='Event missing leadgen_id'` (already-existing code, not new), never touching
+    `provider='whatsapp'` at all. **Action for the client/whoever has Meta dashboard access:**
+    check the exact Callback URL configured for the WhatsApp Business Account's "messages" field
+    subscription and confirm it is `https://<production-domain>/api/integrations/whatsapp-webhook.php`
+    (not the Lead Ads URL) — also check `integrationLogs` filtered to `provider = 'meta'` around the
+    time an inbound message was expected, for a `lead_event`/`rejected` row.
+- **Fix (minimal debug logging added, no architecture change):** `api/integrations/whatsapp-webhook.php`
+  now:
+  1. Logs an unconditional `webhook_received`/`received` row on every POST, **before** the signature
+     check — `bytes`, whether the signature header was present, whether `entry` exists, and its
+     count (never the payload content or the signature value). This alone answers "did the POST
+     arrive at all?" definitively the next time this is checked.
+  2. Logs a `webhook_event`/`rejected` row ("Unrecognized change value shape") whenever a `change.value`
+     has neither `messages[]` nor `statuses[]` — including the change's `field` name and the value's
+     top-level keys (never their content). This is exactly what would catch the "wrong field landed
+     here" hypothesis above, from either direction.
+  3. Checks `mysqli_stmt_execute()` on the `whatsappMessages` INSERT and logs
+     `message_received`/`error` with the DB error text if it fails, instead of silently continuing —
+     closing the "DB insert failing silently" gap.
+  4. Wraps the whole entry/change processing loop in `try/catch (Throwable)`, logging
+     `webhook_event`/`error` with the exception message on any uncaught error — closing the "PHP
+     fatal produces no trace" gap.
+  All four are additive logging only; the message/status processing logic itself (parsing, dedup,
+  conversation matching, status-rank guard) is unchanged.
+- **Files changed:** `api/integrations/whatsapp-webhook.php` only.
+- **Verification:** replayed real HMAC-signed POST requests against this local app using this
+  environment's actual configured App Secret (`hash_hmac('sha256', $payload, $appSecret)`, matching
+  exactly what Meta computes) — (a) a valid `messages[]` text-message payload: created the
+  conversation, inserted the message, logged `message_received`/`created`, **and** the new
+  `webhook_received`/`received` row — full inbound flow confirmed working end-to-end for the
+  documented payload shape; (b) a `leadgen`-shaped payload (simulating the misrouted-webhook
+  hypothesis) sent to this same URL: correctly produced the new `webhook_event`/`rejected`
+  ("Unrecognized change value shape", `field: "leadgen"`) row instead of being silently dropped.
+  All test rows/conversations/temp files created during this verification were deleted afterward.
+  **Not verified against Meta's actual live traffic** — this session has no way to receive a real
+  webhook call (no public HTTPS endpoint reachable from Meta), so whichever of the hypotheses above
+  is the client's actual root cause can only be confirmed once these new log lines capture a real
+  attempt.
+- **Remaining action (client/Meta dashboard, not code):** check the WhatsApp Business Account's
+  "messages" field webhook Callback URL in Meta's dashboard against the exact production URL; after
+  that, or after the next real inbound message attempt either way, re-check `integrationLogs`
+  (all providers, not just `whatsapp`) for the new `webhook_received` row — its presence/absence
+  will immediately tell whether the request is reaching this server at all.
+
 **Phase 7 (partial — see "requires production access" below, 2026-09-28):** Production hardening,
 deployment prep, and handover documentation. **This phase was worked entirely from the local WAMP
 dev environment — no Hostinger/production server or real provider (Meta/Google/WhatsApp) accounts
