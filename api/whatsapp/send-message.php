@@ -92,15 +92,18 @@ if ($messageType === 'text') {
 $messageId = insertPendingWhatsappMessage($con, $conversationId, $messageType, $messageText, $mediaId, $mediaPath, $actor);
 
 if (in_array($messageType, ['image', 'document'], true)) {
-    $uploadedMediaId = uploadWhatsappMedia($secrets, $config, getPrivateStorageRoot() . '/' . WHATSAPP_MEDIA_SUBDIR . '/' . $conversationId . '/' . $mediaPath, $stored['mimeType']);
+    $upload = uploadWhatsappMedia($secrets, $config, getPrivateStorageRoot() . '/' . WHATSAPP_MEDIA_SUBDIR . '/' . $conversationId . '/' . $mediaPath, $stored['mimeType']);
 
-    if (!$uploadedMediaId) {
-        markWhatsappMessageFailed($con, $messageId, 'Could not upload media to WhatsApp.');
-        logIntegrationEvent($con, 'whatsapp', null, 'message_sent', $conversation['leadId'] ?: null, 'error', 'Media upload failed', ['type' => $messageType]);
+    if (!$upload['mediaId']) {
+        markWhatsappMessageFailed($con, $messageId, $upload['error']);
+        logIntegrationEvent($con, 'whatsapp', null, 'message_sent', $conversation['leadId'] ?: null, 'error', $upload['error'], [
+            'type' => $messageType,
+            'recipient' => maskWhatsappNumber((string)$conversation['waId']),
+        ]);
         whatsappJsonExit(502, 'Message could not be sent. It has been kept as failed and can be retried.', ['id' => $messageId, 'status' => 'failed']);
     }
 
-    $mediaId = $uploadedMediaId;
+    $mediaId = $upload['mediaId'];
 }
 
 $sendResult = $messageType === 'text'
