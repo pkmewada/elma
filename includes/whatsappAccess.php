@@ -233,11 +233,28 @@ function whatsappGraphRequest(string $method, string $path, array $secrets, arra
     curl_setopt_array($ch, $options);
     $response = curl_exec($ch);
     $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    // A false $response means the request never got a reply at all (DNS/SSL/timeout/connection
+    // refused) -- distinct from Meta answering with an HTTP error. curl_error() never contains the
+    // Authorization header or its token, only a transport-level diagnostic, so it's safe to log.
+    $transportError = $response === false ? curl_error($ch) : '';
     curl_close($ch);
 
     $decoded = $response !== false ? json_decode($response, true) : null;
 
-    return ['ok' => $httpCode >= 200 && $httpCode < 300, 'httpCode' => $httpCode, 'body' => is_array($decoded) ? $decoded : []];
+    return [
+        'ok' => $httpCode >= 200 && $httpCode < 300,
+        'httpCode' => $httpCode,
+        'body' => is_array($decoded) ? $decoded : [],
+        'transportError' => $transportError,
+    ];
+}
+
+/** Masks all but the last 4 digits of a phone/wa_id -- safe to put in a diagnostic log. */
+function maskWhatsappNumber(string $number): string
+{
+    $length = strlen($number);
+
+    return $length <= 4 ? str_repeat('*', $length) : str_repeat('*', $length - 4) . substr($number, -4);
 }
 
 function sendWhatsappText(array $secrets, array $config, string $toWaId, string $text): array
@@ -279,7 +296,8 @@ function sendWhatsappMedia(array $secrets, array $config, string $toWaId, string
 }
 
 /** Uploads a local file to Meta's media endpoint; returns the media id or null. */
-function uploadWhatsappMedia(array $secrets, array $config, string $filePath, string $mimeType): ?string
+/** Returns ['mediaId' => ?string, 'error' => string] -- error is a safe (no token) reason for the caller to log, empty on success. */
+function uploadWhatsappMedia(array $secrets, array $config, string $filePath, string $mimeType): array
 {
     $phoneNumberId = (string)($config['phoneNumberId'] ?? '');
     $result = whatsappGraphRequest('POST', "{$phoneNumberId}/media", $secrets, $config, null, [
@@ -288,7 +306,15 @@ function uploadWhatsappMedia(array $secrets, array $config, string $filePath, st
         'file' => new CURLFile($filePath, $mimeType),
     ]);
 
-    return $result['ok'] ? ($result['body']['id'] ?? null) : null;
+    if ($result['ok'] && !empty($result['body']['id'])) {
+        return ['mediaId' => $result['body']['id'], 'error' => ''];
+    }
+
+    $metaError = $result['body']['error']['message'] ?? null;
+    $transportError = $result['transportError'] ?? '';
+    $error = $metaError ?? ($transportError !== '' ? 'Could not reach WhatsApp: ' . $transportError : 'Could not upload media to WhatsApp.');
+
+    return ['mediaId' => null, 'error' => mb_substr((string)$error, 0, 255)];
 }
 
 /** Downloads inbound media (two-step: fetch URL, then fetch the bytes) or null on any failure. */
@@ -415,10 +441,23 @@ function finalizeWhatsappSend(mysqli $con, array $conversation, int $messageId, 
         exit;
     }
 
-    // Never expose the raw Meta response to the browser; keep a safe reason for admins in the log.
-    $errorTitle = mb_substr((string)($sendResult['body']['error']['message'] ?? 'Provider send failed'), 0, 255);
+    // Never expose the raw Meta response/token to the browser; keep a safe, specific reason for
+    // admins in the log -- distinguishing "Meta answered with an error" from "the request never
+    // reached Meta" (DNS/SSL/timeout) was previously impossible: both collapsed into the same
+    // generic "Provider send failed", which is what made this class of failure unfixable from the
+    // Integration Log alone.
+    $metaError = $sendResult['body']['error']['message'] ?? null;
+    $transportError = $sendResult['transportError'] ?? '';
+    $errorTitle = $metaError ?? ($transportError !== '' ? 'Could not reach WhatsApp: ' . $transportError : 'Provider send failed');
+    $errorTitle = mb_substr((string)$errorTitle, 0, 255);
+
     markWhatsappMessageFailed($con, $messageId, $errorTitle);
-    logIntegrationEvent($con, 'whatsapp', null, 'message_sent', $conversation['leadId'] ?: null, 'error', $errorTitle, ['type' => $messageType]);
+    logIntegrationEvent($con, 'whatsapp', null, 'message_sent', $conversation['leadId'] ?: null, 'error', $errorTitle, [
+        'type' => $messageType,
+        'httpCode' => $sendResult['httpCode'] ?? 0,
+        'metaErrorCode' => $sendResult['body']['error']['code'] ?? null,
+        'recipient' => maskWhatsappNumber((string)$conversation['waId']),
+    ]);
 
     whatsappJsonExit(502, 'Message could not be sent. It has been kept as failed and can be retried.', ['id' => $messageId, 'status' => 'failed']);
 }

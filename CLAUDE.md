@@ -496,6 +496,123 @@ send) and documents Meta App Review readiness.
   final legal review of the updated privacy/deletion pages; the real production domain entered into
   the Meta App dashboard's App Domains field.
 
+**Bug Fix: WhatsApp Template Sending Debug + Public Legal Routes (2026-09-29):**
+
+- **Root Cause (WhatsApp template send failure):** not a payload/template bug. `whatsappGraphRequest()`
+  (`includes/whatsappAccess.php`) called `curl_exec()` and, on outright transport failure (SSL/DNS/
+  timeout — `curl_exec()` returns `false`, no HTTP response at all), discarded `curl_error()`
+  entirely. Every failure — a real Meta API error *and* a request that never reached Meta — collapsed
+  into the same generic `"Provider send failed"` in `whatsappMessages.errorMessage` and
+  `integrationLogs`, making the actual cause unrecoverable from the CRM's own logs. Reproduced on
+  this local WAMP box: PHP's bundled cURL had no CA bundle configured (`curl.cainfo`/`openssl.cafile`
+  both unset in `php.ini`/`phpForApache.ini`), so `CURLOPT_SSL_VERIFYPEER => true` failed TLS
+  verification on every single outbound HTTPS call (`curl_errno 60`, "SSL certificate problem:
+  unable to get local issuer certificate") — this affected WhatsApp send/media/status calls AND the
+  Meta Lead Ads Graph API fetch identically, not just templates. The template-specific symptoms
+  (window detection, template button, UI) were all already correct, exactly as reported; only the
+  actual Graph API round trip was silently failing.
+- **Fix:** `whatsappGraphRequest()` now captures `curl_error()` when `curl_exec()` returns `false`
+  and returns it as `transportError`. `finalizeWhatsappSend()` and `uploadWhatsappMedia()` now build
+  the stored/logged error from, in order: the real Meta `error.message` → `"Could not reach WhatsApp:
+  " . $transportError` → the old generic fallback (kept only for the case where neither is available).
+  `integrationLogs.payloadSummary` on a send failure now also includes `httpCode`, `metaErrorCode`
+  (Meta's numeric `error.code`), and a masked recipient number (`maskWhatsappNumber()` — last 4
+  digits only, new helper) — exactly the safe fields Section 33's original design intended to
+  capture but never did. `curl_error()` text is transport-level only (e.g. "SSL certificate problem",
+  "Could not resolve host", "Operation timed out") and never contains the Authorization header or
+  its token, so this is safe to store/display to admins; the token itself is still never returned to
+  the browser (unchanged: the browser only ever sees "Message could not be sent...").
+- **Local WAMP environment fix (outside the git repo, not deployed):** added
+  `curl.cainfo`/`openssl.cafile` pointing at this project's own
+  `vendor/composer/ca-bundle/res/cacert.pem` (a legitimate, already-present Mozilla CA bundle) to
+  both `C:\wamp64\bin\php\php8.3.28\php.ini` (CLI) and `...\phpForApache.ini` (the file
+  `C:\wamp64\bin\apache\apache2.4.65\bin\php.ini` symlinks to — confirmed via `php_ini_loaded_file()`
+  through an actual HTTP request). This is a Windows/WAMP-only gotcha (PHP on Windows ships without a
+  default CA bundle); most Linux production hosts (Hostinger included) already have a working system
+  CA store and should never hit `curl_errno 60`. **If the client's real production box ever shows
+  the same `"Could not reach WhatsApp: SSL certificate problem..."` in the Integration Log, the fix
+  is identical: point that server's `curl.cainfo`/`openssl.cafile` at a valid CA bundle.** This
+  environment change could not be fully applied in this session: the CLI `php.ini` picked it up
+  immediately (re-read fresh on every invocation), but the Apache/mod_php worker process needs an
+  actual restart to reload `phpForApache.ini`, and restarting the `wampapache64` Windows service
+  requires elevated privileges this session does not have (`Restart-Service`/`net stop` both failed
+  with access-denied) — **restarting WAMP/Apache is a pending manual step for whoever has admin
+  rights on this machine.**
+- **Files changed:** `includes/whatsappAccess.php` (`whatsappGraphRequest()`, `finalizeWhatsappSend()`,
+  `uploadWhatsappMedia()` signature change to `['mediaId','error']`, new `maskWhatsappNumber()`),
+  `api/whatsapp/send-message.php` (updated to the new `uploadWhatsappMedia()` return shape).
+- **Verification:** re-tested the exact CRM → `whatsapp.js` → `send-template.php` →
+  `whatsappAccess.php` → Graph API flow end-to-end via `curl` against the running app (admin
+  session). Before the local CA fix: HTTP request through `send-template.php` recorded
+  `"Could not reach WhatsApp: SSL certificate problem: unable to get local issuer certificate"` in
+  both `whatsappMessages.errorMessage` and `integrationLogs` (proving the new error-surfacing code
+  itself works, and is exactly what would have shown this root cause immediately instead of the old
+  generic message). Via direct CLI PHP (which picked up the `php.ini` CA fix immediately, unlike the
+  still-unrestarted Apache worker): the identical request reached `graph.facebook.com` cleanly
+  (`curl_errno 0`) and got back a real, parseable Meta error — `HTTP 401 {"error":{"message":"Invalid
+  OAuth access token - Cannot parse access token","type":"OAuthException","code":190}}` — using this
+  environment's test/placeholder access token, confirming the request URL, headers and JSON payload
+  construction are correct per Meta's Cloud API docs and that a *real* access token is the only
+  remaining requirement for a real send to succeed. Template validation (unknown name → 422, wrong
+  variable count → 422), permission/ownership scoping, and text-message sending were all re-confirmed
+  unaffected by this change. All test rows/sessions created during verification were deleted
+  afterward.
+- **Public Legal Routes — Root Cause:** NOT a `routes.php`/router bug. `routes.php`,
+  `getRouteByPath()`, and the `.htaccess` rules were all re-read and traced end-to-end and are
+  correct: `.htaccess` line `RewriteRule ^(pages|employee|app)/ - [F,L]` only blocks *direct* HTTP
+  requests to `/pages/...`; it does not affect `routes.php`'s internal `require_once` (a filesystem
+  include, not a second HTTP request), which is how `/privacy-policy` correctly reaches
+  `pages/privacy-policy.php` today (re-verified live: 200 OK, no session, no redirect, on this
+  environment). The actual bug is in migration history:
+  `2026-09-26c-crm-deactivate-modlus-routes.sql` deactivated `/privacy-policy`, `/terms-of-service`,
+  and `/data-deletion` (`isActive = 0`) along with the rest of that phase's Modlus-route sweep, on
+  the documented understanding they'd be re-enabled once rewritten for this CRM. They were rewritten
+  in Phase 6, and `2026-09-30-crm-phase6-integrations.sql` does reactivate them (`UPDATE routesMaster
+  SET isActive = 1 ... WHERE routePath IN (...)`) — but that reactivation is bundled inside a
+  migration named/scoped for "integrations". **Any environment that applied migrations only through
+  Phase 3/5 and skipped or has not yet reached the Phase 6 integrations migration (a very reasonable
+  thing to defer if Meta/Google/WhatsApp aren't being configured yet) is left with all three legal
+  routes still `isActive = 0`** — `getRouteByPath()` requires `isActive = 1`, so `routes.php` returns
+  a plain 404 for all three URLs. This fully explains "routes exist as files but are not publicly
+  accessible" without any code defect.
+- **Fix / Routes Added:** new migration `database/migrations/2026-10-02-crm-fix-legal-page-routes.sql`
+  — does not assume any prior migration's state. It unconditionally repairs the 3 rows
+  (`isActive = 1, isPublic = 1, layoutType = 'public'`, `pageFile` recomputed from `routePath`) if
+  they exist in any wrong state, and self-heals (`INSERT ... WHERE NOT EXISTS`) if a row is missing
+  entirely. Applied and re-applied twice against the local DB to confirm idempotency (second run is
+  a no-op).
+- **Authentication Behavior (verified live, no session/cookies):** `/privacy-policy`,
+  `/terms-of-service`, `/data-deletion` → HTTP 200, correct rendered content, no login redirect.
+  Direct access to `/pages/privacy-policy.php` (and the other two) → HTTP 403 (blocked by
+  `.htaccess`, exactly as required — the router is the only path in). `/includes/db.php`,
+  `/storage/basic-config.json`, `/database/migrations` → HTTP 403. No PHP warnings in the rendered
+  output for any of the three pages.
+- **Meta Review Readiness:** with this migration applied, all three URLs required for Meta App
+  Review (Privacy Policy, Terms of Service, Data Deletion Instructions) are live and public with no
+  further code change — closing the one concrete gap in README's "9a" Meta App Review readiness
+  table (everything else there was already correct/`CRM_BASE_URL`-driven).
+- **`includes/db.php` git-tracking (raised alongside these two bugs):** confirmed tracked
+  (`git ls-files includes/db.php` returned it) despite being added to `.gitignore` — adding a path to
+  `.gitignore` never untracks an already-tracked file, so it was still being committed on every
+  change. Checked its full git history (2 commits): content has always been the current
+  env-var-only implementation (`CRM_DB_*` via `crmEnv()`, local fallback to the passwordless
+  `elma_crm` MySQL user already documented in this file's Section 2) — **no real credential was ever
+  committed**, so no history rewrite (BFG/filter-repo) is warranted, only `git rm --cached
+  includes/db.php` (run this session, staged, not committed) to make future commits actually respect
+  the `.gitignore` entry going forward. `.env` was confirmed never tracked.
+- **Tests:** see "Verification" above for WhatsApp; see "Authentication Behavior" above for the
+  legal routes. No committed regression-suite scripts exist in this repo (same note as the prior
+  Phase 6.5 template-support entry).
+- **Remaining manual steps:** (1) restart WAMP/Apache (elevated privileges required, not available
+  to this session) to load the CA bundle fix for the Apache-served app — until then, this local
+  environment's own outbound Meta/WhatsApp/Google calls will keep failing with the SSL error the new
+  code now correctly reports; (2) run `2026-10-02-crm-fix-legal-page-routes.sql` against the client's
+  actual production database — this is the one that fixes their real reported bug; (3) once a real
+  WhatsApp access token is configured, re-verify an actual template delivery end-to-end (this session
+  proved the request construction is correct and reaches Meta, but never had a real token to
+  complete a real send); (4) commit `git rm --cached includes/db.php` when the user is ready (left
+  staged, not committed, per instruction not to commit).
+
 **Phase 7 (partial — see "requires production access" below, 2026-09-28):** Production hardening,
 deployment prep, and handover documentation. **This phase was worked entirely from the local WAMP
 dev environment — no Hostinger/production server or real provider (Meta/Google/WhatsApp) accounts
