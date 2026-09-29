@@ -354,3 +354,100 @@ function whatsappStatusRank(string $status): int
 {
     return ['pending' => 0, 'sent' => 1, 'delivered' => 2, 'read' => 3, 'failed' => 9][$status] ?? -1;
 }
+
+/*
+|--------------------------------------------------------------------------
+| Shared outbound-send bookkeeping (used by both send-message.php and
+| send-template.php so the pending/sent/failed lifecycle, activity logging
+| and integration logging stay in exactly one place).
+|--------------------------------------------------------------------------
+*/
+
+/** Inserts the outbound message row as 'pending' BEFORE any Meta API call, so a failure at any later step still leaves a visible, retryable row. */
+function insertPendingWhatsappMessage(mysqli $con, int $conversationId, string $messageType, ?string $messageText, ?string $mediaId, ?string $mediaPath, array $actor): int
+{
+    $stmt = mysqli_prepare($con, "
+        INSERT INTO whatsappMessages (conversationId, direction, messageType, messageText, mediaId, mediaPath, status, sentByType, sentById, sentAt)
+        VALUES (?, 'outbound', ?, ?, ?, ?, 'pending', ?, ?, NOW())
+    ");
+    mysqli_stmt_bind_param($stmt, 'isssssi', $conversationId, $messageType, $messageText, $mediaId, $mediaPath, $actor['type'], $actor['id']);
+    mysqli_stmt_execute($stmt);
+    $messageId = mysqli_insert_id($con);
+    mysqli_stmt_close($stmt);
+
+    return $messageId;
+}
+
+function markWhatsappMessageFailed(mysqli $con, int $messageId, string $errorMessage): void
+{
+    $errorMessage = mb_substr($errorMessage, 0, 255);
+    $stmt = mysqli_prepare($con, "UPDATE whatsappMessages SET status = 'failed', errorMessage = ? WHERE id = ?");
+    mysqli_stmt_bind_param($stmt, 'si', $errorMessage, $messageId);
+    mysqli_stmt_execute($stmt);
+    mysqli_stmt_close($stmt);
+}
+
+/** Records a Meta send result against a pending message row and exits with the same JSON shape either way -- never returns. */
+function finalizeWhatsappSend(mysqli $con, array $conversation, int $messageId, array $sendResult, string $messageType, ?string $messageText): void
+{
+    $conversationId = (int)$conversation['id'];
+    $metaMessageId = $sendResult['body']['messages'][0]['id'] ?? null;
+
+    if ($sendResult['ok'] && $metaMessageId) {
+        $updateStmt = mysqli_prepare($con, "UPDATE whatsappMessages SET status = 'sent', metaMessageId = ? WHERE id = ?");
+        mysqli_stmt_bind_param($updateStmt, 'si', $metaMessageId, $messageId);
+        mysqli_stmt_execute($updateStmt);
+        mysqli_stmt_close($updateStmt);
+
+        $preview = $messageType === 'text' ? mb_substr((string)$messageText, 0, 250) : ('[' . ucfirst($messageType) . '] ' . mb_substr((string)$messageText, 0, 200));
+        $convUpdate = mysqli_prepare($con, 'UPDATE whatsappConversations SET lastMessageAt = NOW(), lastMessagePreview = ? WHERE id = ?');
+        mysqli_stmt_bind_param($convUpdate, 'si', $preview, $conversationId);
+        mysqli_stmt_execute($convUpdate);
+        mysqli_stmt_close($convUpdate);
+
+        if ($conversation['leadId']) {
+            saveActivityLog($con, 'Lead', (int)$conversation['leadId'], 'WHATSAPP_SENT', 'WhatsApp message sent : ' . ($conversation['leadFullName'] ?: $conversation['waId']));
+        }
+
+        logIntegrationEvent($con, 'whatsapp', $metaMessageId, 'message_sent', $conversation['leadId'] ?: null, 'created', 'Message sent', ['type' => $messageType]);
+
+        echo json_encode(['success' => true, 'message' => 'Message sent.', 'data' => ['id' => $messageId, 'status' => 'sent', 'metaMessageId' => $metaMessageId]]);
+        exit;
+    }
+
+    // Never expose the raw Meta response to the browser; keep a safe reason for admins in the log.
+    $errorTitle = mb_substr((string)($sendResult['body']['error']['message'] ?? 'Provider send failed'), 0, 255);
+    markWhatsappMessageFailed($con, $messageId, $errorTitle);
+    logIntegrationEvent($con, 'whatsapp', null, 'message_sent', $conversation['leadId'] ?: null, 'error', $errorTitle, ['type' => $messageType]);
+
+    whatsappJsonExit(502, 'Message could not be sent. It has been kept as failed and can be retried.', ['id' => $messageId, 'status' => 'failed']);
+}
+
+/**
+ * Matches a requested template name/language against the admin-approved
+ * list (Integrations -> WhatsApp Cloud API -> Approved Templates,
+ * config.templates). Meta is the source of truth for whether a template is
+ * actually approved -- this only stops a request for a name/language/
+ * variable-count the admin never configured from reaching the Graph API,
+ * catching typos and mismatched variable counts before they burn a send.
+ */
+function findApprovedWhatsappTemplate(array $config, string $name, string $language): ?array
+{
+    if ($name === '') {
+        return null;
+    }
+
+    foreach ((array)($config['templates'] ?? []) as $template) {
+        if (!is_array($template) || ($template['name'] ?? '') !== $name) {
+            continue;
+        }
+
+        if ($language !== '' && ($template['language'] ?? '') !== $language) {
+            continue;
+        }
+
+        return $template;
+    }
+
+    return null;
+}

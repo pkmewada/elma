@@ -10,6 +10,7 @@ $(function () {
         conversations: API_BASE + "/whatsapp/getConversations.php",
         messages: API_BASE + "/whatsapp/getMessages.php",
         send: API_BASE + "/whatsapp/send-message.php",
+        sendTemplate: API_BASE + "/whatsapp/send-template.php",
         markRead: API_BASE + "/whatsapp/mark-read.php",
         linkLead: API_BASE + "/whatsapp/linkLead.php",
     };
@@ -158,6 +159,7 @@ $(function () {
         }
 
         $("#waMessageInput, #waAttachBtn, #waSendBtn").prop("disabled", !permissions.canSend || !integrationEnabled || !windowOpen);
+        $("#waTemplateBtn").prop("disabled", !permissions.canSend || !integrationEnabled);
     }
 
     function openConversation(conversationId, leadId) {
@@ -211,9 +213,9 @@ $(function () {
     });
 
     // ---------- Composer: text ----------
-    function sendPayload(formData) {
+    function sendPayload(formData, url) {
         $("#waSendBtn").prop("disabled", true);
-        $.ajax({ url: api.send, type: "POST", dataType: "json", data: formData, processData: false, contentType: false })
+        $.ajax({ url: url || api.send, type: "POST", dataType: "json", data: formData, processData: false, contentType: false })
             .done(function (res) {
                 if (!res || !res.success) { toast("danger", (res && res.message) || "Message could not be sent."); }
                 refreshActiveConversation();
@@ -281,12 +283,11 @@ $(function () {
         if (!opt.length || !activeConversationId) { toast("warning", "Select a template."); return; }
         var fd = new FormData();
         fd.append("conversationId", activeConversationId);
-        fd.append("messageType", "template");
         fd.append("templateName", opt.val());
         fd.append("templateLanguage", opt.data("language") || "en_US");
         $(".wa-template-var").each(function () { fd.append("templateVariables[]", $(this).val()); });
         $("#waTemplateModal").modal("hide");
-        sendPayload(fd);
+        sendPayload(fd, api.sendTemplate);
     });
 
     // ---------- Link / create lead ----------
