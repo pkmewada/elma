@@ -55,14 +55,28 @@ if ((int)($_SERVER['CONTENT_LENGTH'] ?? 0) > 2 * 1024 * 1024) {
 
 $rawBody = file_get_contents('php://input');
 
+// Unconditional receipt log -- BEFORE the signature check -- so "the webhook
+// was never reached" is distinguishable from "it was reached and rejected".
+// Safe fields only: sizes/booleans/counts, never the signature header value
+// or the raw payload itself.
+$payloadPreview = json_decode($rawBody, true);
+logIntegrationEvent($con, PROVIDER, null, 'webhook_received', null, 'received', 'Webhook POST received', [
+    'bytes' => strlen($rawBody),
+    'hasSignatureHeader' => isset($_SERVER['HTTP_X_HUB_SIGNATURE_256']),
+    'hasEntry' => isset($payloadPreview['entry']),
+    'entryCount' => is_array($payloadPreview['entry'] ?? null) ? count($payloadPreview['entry']) : 0,
+]);
+
 if (!verifyMetaSignature($rawBody, (string)($secrets['appSecret'] ?? ''), $_SERVER['HTTP_X_HUB_SIGNATURE_256'] ?? null)) {
     logIntegrationEvent($con, PROVIDER, null, 'webhook_event', null, 'error', 'Invalid or missing signature');
     whatsappJsonExit(401, 'Invalid signature.');
 }
 
 $config = getIntegrationConfig($con, PROVIDER);
-$payload = json_decode($rawBody, true);
+$payload = $payloadPreview;
 $entries = is_array($payload['entry'] ?? null) ? $payload['entry'] : [];
+
+try {
 
 foreach ($entries as $entry) {
     $changes = is_array($entry['changes'] ?? null) ? $entry['changes'] : [];
@@ -72,6 +86,19 @@ foreach ($entries as $entry) {
         $contacts = is_array($value['contacts'] ?? null) ? $value['contacts'] : [];
         $messages = is_array($value['messages'] ?? null) ? $value['messages'] : [];
         $statuses = is_array($value['statuses'] ?? null) ? $value['statuses'] : [];
+
+        // Neither shape this parser understands -- most likely either a
+        // different webhook "field" landed on this URL (e.g. Meta's
+        // Lead Ads 'leadgen' field pointed at the WhatsApp callback URL by
+        // mistake, or vice versa) or Meta added a new value shape. Logging
+        // the field name + value's top-level keys (never their content) is
+        // enough to tell which, without needing to dump the raw payload.
+        if (!$messages && !$statuses) {
+            logIntegrationEvent($con, PROVIDER, null, 'webhook_event', null, 'rejected', 'Unrecognized change value shape', [
+                'field' => $change['field'] ?? null,
+                'valueKeys' => is_array($value) ? array_keys($value) : [],
+            ]);
+        }
 
         // ---------------- Inbound messages ----------------
         foreach ($messages as $message) {
@@ -134,8 +161,17 @@ foreach ($entries as $entry) {
                 VALUES (?, ?, 'inbound', ?, ?, ?, ?, 'received', ?)
             ");
             mysqli_stmt_bind_param($insertStmt, 'issssss', $conversation['id'], $metaMessageId, $type, $messageText, $mediaId, $mediaPath, $sentAt);
-            mysqli_stmt_execute($insertStmt);
+            $inserted = mysqli_stmt_execute($insertStmt);
+            $insertError = $inserted ? '' : mysqli_error($con);
             mysqli_stmt_close($insertStmt);
+
+            // db.php runs with mysqli_report(MYSQLI_REPORT_OFF) -- a failed INSERT
+            // here would otherwise be completely silent (no exception, no warning)
+            // and the message would just vanish with no trace anywhere.
+            if (!$inserted) {
+                logIntegrationEvent($con, PROVIDER, $metaMessageId, 'message_received', $conversation['leadId'] ?: null, 'error', 'DB insert failed: ' . mb_substr($insertError, 0, 200), ['from' => $waId, 'type' => $type]);
+                continue;
+            }
 
             $updateStmt = mysqli_prepare($con, 'UPDATE whatsappConversations SET lastMessageAt = ?, lastMessagePreview = ?, unreadCount = unreadCount + 1 WHERE id = ?');
             mysqli_stmt_bind_param($updateStmt, 'ssi', $sentAt, $preview, $conversation['id']);
@@ -207,6 +243,15 @@ foreach ($entries as $entry) {
             }
         }
     }
+}
+
+} catch (Throwable $e) {
+    // Without this, an uncaught error anywhere in the loop above (e.g. a
+    // missing dependency, a schema mismatch) would 500 with no body and,
+    // critically, no integrationLogs row at all -- indistinguishable from
+    // the webhook never having been reached in the first place.
+    error_log('whatsapp-webhook failed: ' . $e->getMessage());
+    logIntegrationEvent($con, PROVIDER, null, 'webhook_event', null, 'error', 'Unhandled error: ' . mb_substr($e->getMessage(), 0, 200));
 }
 
 echo json_encode(['success' => true]);
