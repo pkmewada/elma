@@ -43,7 +43,7 @@ if (!defined('CONTACT_EMAIL')) {
     <div class="notice">This page is implementation-accurate but is a placeholder pending final review by the client's own legal counsel before public/App Review use.</div>
 
     <div class="policy-content">
-        <p>This page explains how to request deletion of data associated with an enquiry you submitted to <?= htmlspecialchars($brand, ENT_QUOTES, 'UTF-8') ?>, whether through our website, a Meta Lead Ads form, or a Google Lead Form.</p>
+        <p>This page explains how to request deletion of data associated with an enquiry you submitted to <?= htmlspecialchars($brand, ENT_QUOTES, 'UTF-8') ?>, whether through our website, a Meta Lead Ads form, a Google Lead Form, or a WhatsApp conversation with our business number.</p>
 
         <h2>What Can Be Deleted</h2>
         <p>Upon a verified request, we can delete the following data that our CRM stores about you:</p>
@@ -51,7 +51,8 @@ if (!defined('CONTACT_EMAIL')) {
             <li>Your contact details (name, phone number, email address) submitted with your enquiry.</li>
             <li>The project/property interest and any message submitted with your enquiry.</li>
             <li>Follow-up and communication records our sales team kept about your enquiry.</li>
-            <li>The record of how your enquiry reached us (website form, Meta Lead Ads, or Google Lead Forms).</li>
+            <li>Your WhatsApp conversation history with us, including messages and any media exchanged.</li>
+            <li>The record of how your enquiry reached us (website form, Meta Lead Ads, Google Lead Forms, or WhatsApp).</li>
         </ul>
 
         <h2>How to Request Deletion</h2>
@@ -64,7 +65,7 @@ if (!defined('CONTACT_EMAIL')) {
         </ol>
 
         <h2>Social Platform Data</h2>
-        <p>Deleting your data from our CRM removes the applicable information from our own systems, but it does not delete information held directly by Meta, Instagram, Facebook, or Google. We cannot delete data from a third-party platform's own systems. To remove information held directly by those platforms, or to stop seeing ads from us, please use that platform's own account and ad-preference settings directly.</p>
+        <p>Deleting your data from our CRM removes the applicable information from our own systems, but it does not delete information held directly by Meta, Instagram, Facebook, WhatsApp, or Google. We cannot delete data from a third-party platform's own systems. To remove information held directly by those platforms, or to stop seeing ads from us, please use that platform's own account and ad-preference settings directly; to stop receiving WhatsApp messages from us, you may also block or report our business number directly in WhatsApp.</p>
 
         <h2>Processing Time</h2>
         <p>Requests will be reviewed and processed within a reasonable period, subject to verification and applicable legal or operational requirements.</p>

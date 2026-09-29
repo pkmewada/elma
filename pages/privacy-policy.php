@@ -55,7 +55,8 @@ if (!defined('CONTACT_EMAIL')) {
         <ul>
             <li>Contact details you provide when enquiring about a property: full name, phone number, and email address.</li>
             <li>The project or property you expressed interest in, and any message or notes submitted with your enquiry.</li>
-            <li>How your enquiry reached us: directly through our website's enquiry form, through a Meta (Facebook/Instagram) Lead Ads form, or through a Google Lead Form ad.</li>
+            <li>How your enquiry reached us: directly through our website's enquiry form, through a Meta (Facebook/Instagram) Lead Ads form, through a Google Lead Form ad, or by messaging our WhatsApp Business number.</li>
+            <li>If you message our WhatsApp Business number: the content of the messages you send us (text, and any image or document you share), and the messages/templates we send back to you.</li>
             <li>Follow-up activity recorded by our sales team, such as call outcomes, status updates, and scheduled follow-ups.</li>
             <li>Technical information reasonably needed to operate and secure the CRM, such as request logs used for troubleshooting.</li>
         </ul>
@@ -74,11 +75,14 @@ if (!defined('CONTACT_EMAIL')) {
         <h2>D. Meta and Google Lead Ads</h2>
         <p>If you submit your details through a Meta (Facebook/Instagram) Lead Ads form or a Google Lead Form advertising one of our projects, the information you provide on that form (such as your name, phone number, and email address) is passed to our CRM through that platform's own lead-notification mechanism, strictly according to the permissions associated with that ad form. We only request the information needed to follow up on your enquiry.</p>
 
+        <h2>D2. WhatsApp Messaging (Meta WhatsApp Cloud API)</h2>
+        <p>If you message our WhatsApp Business number, or we message you there in connection with your enquiry, that conversation (including message text, media you or we share, and delivery/read status) is received and sent through Meta's WhatsApp Cloud API and stored in our CRM so our sales team can view and continue the conversation. Outside of an active conversation window, we may only send you a pre-approved WhatsApp message template, per Meta's WhatsApp messaging rules. We do not use your WhatsApp number or conversation content for advertising or marketing without your enquiry giving rise to that contact.</p>
+
         <h2>E. Credentials Used to Receive Leads</h2>
-        <p>API keys, access tokens, and shared secrets used by the CRM to receive leads from Meta, Google, or our website form are stored in encrypted form and are used only to authenticate incoming lead notifications. These credentials are not displayed in the CRM interface after they are saved, are not included in application logs, and are not shared outside of what is required to receive leads.</p>
+        <p>API keys, access tokens, and shared secrets used by the CRM to receive leads or messages from Meta, Google, WhatsApp, or our website form are stored in encrypted form and are used only to authenticate incoming lead/message notifications and to send messages back through those platforms. These credentials are not displayed in the CRM interface after they are saved, are not included in application logs, and are not shared outside of what is required to operate these channels.</p>
 
         <h2>F. Data Sharing</h2>
-        <p>We do not sell personal information. Information may be processed by service providers who help operate our CRM (such as hosting/infrastructure providers), and by the advertising platforms themselves (Meta, Google) where necessary to deliver your enquiry to us — always limited to what is required for that purpose.</p>
+        <p>We do not sell personal information. Information may be processed by service providers who help operate our CRM (such as hosting/infrastructure providers), and by the platforms themselves (Meta/WhatsApp, Google) where necessary to deliver your enquiry or message to us, or to deliver our reply to you — always limited to what is required for that purpose.</p>
 
         <h2>G. Data Retention</h2>
         <p>We retain enquiry and lead information for as long as reasonably necessary to respond to your enquiry, maintain accurate sales records, and comply with applicable legal or operational requirements. You may request deletion of your data at any time — see the <a href="/data-deletion">Data Deletion Instructions</a> page for details.</p>

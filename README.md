@@ -278,15 +278,47 @@ ID, Access Token, App Secret, Verify Token, and the approved template list (name
 count — templates themselves are created and approved in Meta Business Manager, not in this CRM).
 Webhook URL: `https://<domain>/api/integrations/whatsapp-webhook.php`.
 
+**Template messages** (used when the 24-hour customer service window is closed, or any time an
+approved template is wanted): `POST api/whatsapp/send-template.php` — a dedicated endpoint,
+separate from the free-text `send-message.php`, so a template send is validated against the
+admin-configured list (name + language + exact variable count) before it ever reaches the Graph
+API. The chat composer shows a disabled text box + a "Send Template" button once the window is
+closed (and the template button is always available); selecting a template renders exactly as
+many variable inputs as `variableCount` says. This CRM only stores the template's name/language/
+variable count — the templates themselves must already be approved in Meta Business Manager, and
+this CRM cannot verify that approval status itself.
+
 Real end-to-end verification required after go-live (not done locally, no live credentials):
 1. Send a WhatsApp message to the business number from a real phone → confirm it appears in
    `/whatsapp` within seconds.
 2. Reply from the CRM → confirm the customer receives it, and the status advances
    Sent → Delivered → Read.
 3. Send an image and a document both directions.
-4. Confirm the 24-hour window banner appears correctly, and that a real approved template sends
+4. Confirm the 24-hour window banner appears correctly, and that a real *approved* template sends
    successfully outside the window (do not consider templates production-ready until this
-   succeeds for real).
+   succeeds for real — a template name/variable count that is only "configured" in this CRM but
+   not actually approved in Meta Business Manager will still be rejected by Meta itself).
+
+### 9a. Meta App Review readiness
+
+What this codebase provides vs. what only the client/Meta dashboard can provide, for both the
+Lead Ads app and the WhatsApp Business app review:
+
+| Requirement | Status |
+|---|---|
+| Privacy Policy URL | `https://<domain>/privacy-policy` — content rewritten for this CRM (incl. WhatsApp messaging data) in Phase 6/6.5. **Needs**: client's real contact address, final legal sign-off. |
+| Terms of Service URL | `https://<domain>/terms-of-service` — same status as above. |
+| User Data Deletion URL | `https://<domain>/data-deletion` — same status; describes WhatsApp conversation data explicitly. |
+| App Domains | Not hardcoded anywhere in code — driven entirely by `CRM_BASE_URL`. **Needs**: the client enters the live production domain in the Meta App dashboard once it's known. |
+| Contact information (email/phone shown to Meta reviewers) | `CONTACT_EMAIL` in the three legal pages is a placeholder (`privacy@elmarealestate.example`). **Needs**: client's real support address before submission. |
+| Webhook URLs | Computed from `CRM_BASE_URL`, never hardcoded — also returned live by `getIntegrationSettings.php`'s `urls` field for the Integrations page to display: `.../api/integrations/meta-webhook.php` (Lead Ads), `.../api/integrations/whatsapp-webhook.php` (WhatsApp). Both already implement Meta's GET handshake + `X-Hub-Signature-256` verification. **Needs**: the client/reviewer to actually point Meta's webhook subscription at the live URL and complete the handshake — cannot be done from this environment without a live App Secret/Verify Token. |
+| WhatsApp configuration requirements | Phone Number ID, WABA ID, Access Token, App Secret, Verify Token, template list — all configurable under Integrations, none hardcoded. **Needs**: the client's real WhatsApp Business Account assets, and Meta's own approval of each template used. |
+| HTTPS | Enforced by `includes/config.php`'s cookie `Secure` flag once off `localhost` (Phase 7). **Needs**: the production host to actually terminate HTTPS (Hostinger/Let's Encrypt), which cannot be verified from local WAMP. |
+
+Nothing in this list required inventing new legal claims or fake credentials — everything marked
+"Needs" is either a piece of information only the client has (their real domain, contact address,
+Meta/WhatsApp Business assets) or an action only performable against a live server (the webhook
+handshake, HTTPS).
 
 ### 10. Backups
 
@@ -343,6 +375,8 @@ The procedure above is documented so it can be exercised on the actual productio
 [ ] Google Lead Forms verified live -- requires client's Google Ads assets
 [ ] WhatsApp webhook verified live (real handshake) -- requires client's Meta WhatsApp assets
 [ ] WhatsApp real send/receive verified -- requires a live WhatsApp Business number
+[ ] WhatsApp templates in Integrations settings match templates actually APPROVED in Meta Business Manager
+[ ] Meta App Review: App Domains set to the real production domain, contact email updated from placeholder
 [ ] Legal pages finalized with client's real contact + legal sign-off
 [ ] Full security regression suite passing
 [ ] Browser QA passing at 1440/1280/390px across Admin/Manager/Executive

@@ -23,3 +23,4 @@ logs/*
 
 # Full-install dump contains account password hashes — never commit
 database/install/*.sql
+includes/config.php

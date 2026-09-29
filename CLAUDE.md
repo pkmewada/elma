@@ -433,6 +433,69 @@ no WebSockets, no queue.
   template names/variable counts from the client's own Meta Business Manager; deciding whether to
   keep or clear the demo conversations/leads before go-live.
 
+**Phase 6.5 WhatsApp Template Support + Meta App Review prep (complete, 2026-09-29):** Split
+template sending into its own validated endpoint and prepared the Meta App Review paperwork.
+Nothing here rebuilds Phase 6.5 — the composer, window-closed detection, and per-provider template
+config (`config.templates`) already existed; this closes the one real gap (an unvalidated template
+send) and documents Meta App Review readiness.
+- **`api/whatsapp/send-template.php`** (new): dedicated endpoint for template sends, split out of
+  `send-message.php`'s old `messageType=template` branch. Same gate as every other WhatsApp send
+  (session + CSRF via `api-gateway.php` + `send_whatsapp_message` action + `requireConversationAccess()`
+  scoping), plus new validation the old branch never had: `findApprovedWhatsappTemplate()`
+  (`includes/whatsappAccess.php`) rejects any name/language not present in the admin's configured
+  `config.templates` list, and the variable count submitted must exactly match that template's
+  configured `variableCount` — both 422 before any Graph API call. `send-message.php` now rejects
+  `messageType=template` outright (422, points at the new endpoint) so there is exactly one,
+  validated path to send a template. Template sends are allowed regardless of the 24h window (that
+  remains their purpose, unchanged from Phase 6.5).
+- **`includes/whatsappAccess.php`**: extracted `insertPendingWhatsappMessage()` and
+  `finalizeWhatsappSend()` (the pending-row-insert and sent/failed-bookkeeping-plus-activity-and-
+  integration-logging that `send-message.php` already had) so `send-template.php` reuses the exact
+  same status lifecycle/logging instead of a second copy. `send-message.php`'s text/image/document
+  behavior is unchanged — confirmed by re-sending a text message and re-checking `windowOpen`
+  handling against the existing demo conversations after the refactor.
+- **UI** (`dist/assets/js/whatsapp.js`): template sends now POST to `send-template.php` instead of
+  `send-message.php` with `messageType=template` (no `messageType` field needed on that endpoint —
+  it's always a template). `#waTemplateBtn` is now also disabled when `!canSend`/integration
+  disabled, matching the existing text/attach/send disabling — it was previously always enabled
+  regardless of permission. No HTML/modal changes needed: the composer already showed a disabled
+  text box + "Send Template" button when the window is closed, and a template picker + per-variable
+  inputs modal, from Phase 6.5.
+- **Legal pages updated for WhatsApp** (`pages/privacy-policy.php`, `pages/data-deletion.php`):
+  Phase 6.5 added WhatsApp conversations/messages as a stored data type but the legal pages never
+  mentioned it explicitly (only "follow-up via WhatsApp"). Added: WhatsApp as an enquiry channel and
+  as message content collected, a dedicated "WhatsApp Messaging" section in the privacy policy
+  (conversation storage, the 24h window, template-only messaging outside it), WhatsApp conversation
+  data added to what can be deleted, and Meta/WhatsApp added to the "can't delete third-party
+  platform data" notice. `terms-of-service.php` already covered WhatsApp generically and needed no
+  change. `CONTACT_EMAIL` remains the Phase 6 placeholder in all three pages (unchanged) — still
+  pending the client's real address.
+- **Meta App Review readiness audited** (documented in [README.md](README.md) section "9a"):
+  privacy/terms/data-deletion URLs, App Domains, contact info, webhook URLs, and WhatsApp
+  configuration requirements were all verified against the actual code (none hardcode a domain —
+  everything is `CRM_BASE_URL`-driven) and split into what's done vs. what only the client/Meta
+  dashboard can supply (real domain, real contact address, real WhatsApp Business assets, the live
+  webhook handshake, legal sign-off).
+- **Security verified**: `getIntegrationSettings.php`/`getMessages.php` confirmed to never return
+  `accessToken`/`appSecret`/`verifyToken` (only `hasSecret: bool` and the non-secret `config`,
+  including `templates`); a live curl-based test against the running local app confirmed a
+  restricted Sales Executive gets 404 on a conversation they don't own or that's unassigned (cannot
+  send a template to it), an admin can send successfully, CSRF-less and session-less requests are
+  rejected (403/401), an unknown template name and a wrong variable count are both rejected (422)
+  before any Meta call, and the old `send-message.php` template path is now hard-rejected (422).
+- **Tests**: no committed regression-suite scripts exist in this repo to re-run (the `sectest*.sh`/
+  `run-p*.mjs` scripts referenced by earlier phases were session-local and were never committed);
+  verification here was done directly against the running local WAMP app (`http://localhost/elma`)
+  using temporary PHP-session-backed admin/employee sessions and `curl`, covering every case listed
+  above, with all test message rows cleaned up afterward. No browser/UI click-through was performed
+  in this phase (no browser tool was used) — the composer/modal HTML and JS wiring were verified by
+  code review only; a manual click-through of the template modal is recommended before relying on
+  it for a client demo.
+- **Remaining / needs Meta dashboard or client action**: everything under README's "9a" table
+  marked "Needs"; a live Meta Business Manager template actually approved and exercised end-to-end;
+  final legal review of the updated privacy/deletion pages; the real production domain entered into
+  the Meta App dashboard's App Domains field.
+
 **Phase 7 (partial — see "requires production access" below, 2026-09-28):** Production hardening,
 deployment prep, and handover documentation. **This phase was worked entirely from the local WAMP
 dev environment — no Hostinger/production server or real provider (Meta/Google/WhatsApp) accounts
