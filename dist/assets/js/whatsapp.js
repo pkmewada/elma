@@ -21,6 +21,16 @@ $(function () {
     var listTimer = null;
     var messageTimer = null;
     var lastMessageCount = 0;
+    var lastMessageSignature = "";
+
+    // id+status per message, not just the count -- a status-only change (an
+    // outbound tick advancing pending -> sent -> delivered -> read, or a
+    // send moving to failed) doesn't change how many messages there are, so
+    // comparing count alone silently missed it and the UI could sit stale
+    // showing an old status until the conversation was closed and reopened.
+    function messagesSignature(messages) {
+        return messages.map(function (m) { return m.id + ":" + m.status; }).join(",");
+    }
 
     function esc(v) { return $("<div>").text(v == null ? "" : String(v)).html(); }
     function toast(t, m) { if (window.showToast) window.showToast(t, m); }
@@ -179,6 +189,7 @@ $(function () {
                 renderHeader(data.conversation, data.windowOpen, data.windowOpenUntil, data.integrationEnabled);
                 renderMessages(data.messages);
                 lastMessageCount = data.messages.length;
+                lastMessageSignature = messagesSignature(data.messages);
                 window.waTemplates = data.templates || [];
 
                 $.post(api.markRead, { conversationId: activeConversationId });
@@ -195,10 +206,14 @@ $(function () {
                 if (!res || !res.success) return;
                 var data = res.data;
                 renderHeader(data.conversation, data.windowOpen, data.windowOpenUntil, data.integrationEnabled);
-                if (data.messages.length !== lastMessageCount) {
+                var signature = messagesSignature(data.messages);
+                if (signature !== lastMessageSignature) {
                     renderMessages(data.messages);
-                    lastMessageCount = data.messages.length;
-                    $.post(api.markRead, { conversationId: activeConversationId });
+                    lastMessageSignature = signature;
+                    if (data.messages.length !== lastMessageCount) {
+                        lastMessageCount = data.messages.length;
+                        $.post(api.markRead, { conversationId: activeConversationId });
+                    }
                 }
             });
     }

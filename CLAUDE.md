@@ -699,6 +699,84 @@ send) and documents Meta App Review readiness.
   (all providers, not just `whatsapp`) for the new `webhook_received` row — its presence/absence
   will immediately tell whether the request is reaching this server at all.
 
+**Full WhatsApp Integration Audit (2026-09-29), following up the webhook debug above:** the client
+provided a production data export (`whatsappMessages` table) taken from the live `hyther.in`
+deployment, which materially changed the diagnosis versus the prior entry above.
+
+- **What the production export actually shows:** 9 outbound template attempts and exactly 1 inbound
+  row. The single inbound row (`metaMessageId = 'ABGGFlA5Fpa'`, text "this is a text message",
+  `sentAt = '2017-09-09 02:06:28'`) is **Meta's own dashboard "Test" button payload** — that exact
+  short message id and stale/sample timestamp match Meta's canned test event for the "messages"
+  field, not a real customer. Its presence proves the full pipeline (Meta reaching the registered
+  Callback URL → signature verification → JSON parsing → conversation creation → `whatsappMessages`
+  INSERT) **is working end-to-end in production** — which **rules out** the previous entry's leading
+  hypothesis (WhatsApp's field pointed at the wrong/Lead-Ads callback URL). No real customer inbound
+  message has been observed in this export either succeeding or failing.
+- **The 9 outbound rows, read in order, are historical self-resolved configuration noise from the
+  client's own live setup session, not a current code bug:** `"Unknown path components:
+  /1301707419697777/messages"` (attempts 1, 4, 5) and `"Error validating access token: ... Session
+  has expired"` (attempts 2, 3) both stopped occurring once the client replaced the access token;
+  attempts 6-8 then failed with Meta's own `(#132001) Template name does not exist in the
+  translation` because the submitted template name was literally the placeholder string `"language"`
+  (attempts 1-6) and then `"order_confirmation"` (7-8) — neither ever an approved template in this
+  client's Meta Business Manager (the latter was this project's own local/demo config value,
+  evidently copied into the production Integrations settings). Attempts 9 and 11, using Meta's
+  built-in sample template `hello_world`, **succeeded** (`status='sent'`, a real `wamid.` returned).
+  This confirms the send pipeline, URL construction, API version fallback, and token loading are all
+  correct once a real access token and a real approved template name are used — **no code fix
+  applies to any of this; it was the client finding working values through trial and error**, exactly
+  the kind of thing the Phase 6.5 template-validation fix (checking submitted names against the
+  admin's own configured list) is meant to catch faster next time.
+- **Confirmed bug found and fixed:** `dist/assets/js/whatsapp.js`'s `refreshActiveConversation()`
+  only re-rendered the open conversation's messages when `messages.length` changed. A delivery-status
+  update (Meta's `statuses[]` webhook advancing pending → sent → delivered → read, or → failed) changes
+  an existing row's `status` column without changing the row count, so the open chat window could sit
+  showing a stale checkmark (or miss a send failure) until the conversation was closed and reopened.
+  This is real, but it does **not** explain the reported "inbound not appearing" symptom (a genuinely
+  new inbound row always changes the count, which was already detected correctly) — it only affects
+  outbound status-tick freshness. **Fix:** track a per-poll signature of `id:status` pairs across all
+  messages instead of just the count; re-render whenever the signature changes, and still call
+  `mark-read` only when the count specifically increased (preserving existing mark-read semantics).
+- **Possible issues / hardening notes (not fixed, not confirmed as bugs, flagged for awareness):**
+  - `whatsappMessages.sentAt`/`deliveredAt`/`readAt` are `DATETIME` (literal, no timezone conversion)
+    while `createdAt` is `TIMESTAMP` (converted per-session from UTC). Both are written correctly
+    together by the app's own PHP process (`db.php`'s `SET time_zone = '+05:30'` applies to both in
+    the same session), so this is not a live bug — but a raw `mysqldump`/phpMyAdmin export taken with
+    a *different* session default will display the two columns up to ~5.5 hours apart (exactly what
+    the client's own export showed), which can look like a bug but isn't one. Worth remembering before
+    trusting timestamps from an ad-hoc DB export.
+  - The prior entry's new unconditional `webhook_received` log fires on every POST, before signature
+    verification -- intentional (that's what makes "did a request even arrive" answerable), but it
+    means `integrationLogs` will accumulate a row for any scanner/bot hitting the public webhook URL,
+    not just Meta. Not a security issue (no DB write happens beyond the log row, and invalid-signature
+    requests are still rejected immediately after), but worth knowing if `integrationLogs` volume
+    ever needs pruning.
+  - No rate limiting on the public webhook/send endpoints beyond signature verification and normal
+    session/CSRF/permission checks -- consistent with the rest of this codebase's stated scope, not
+    a regression, just noted since section 8 of this audit asked about it explicitly.
+- **No issues found:** `getMessages.php` (no `direction` filter — inbound and outbound both render
+  identically once present), `getConversations.php` (ownership scoping, search, unread badge),
+  `mark-read.php`, dedup (`UNIQUE KEY` on `metaMessageId`, NULL-safe for still-pending outbound rows),
+  FK constraints (`ON DELETE SET NULL`/`CASCADE` as appropriate), indexes on `conversationId`,
+  `lastMessageAt`, `phoneNumber`, `assignedToId`, the out-of-order status-downgrade guard
+  (`whatsappStatusRank()`), and every permission/ownership/CSRF check re-audited from Phase 6.5 —
+  all unchanged and correct.
+- **Files changed:** `dist/assets/js/whatsapp.js` only.
+- **Test performed:** local replay only (same constraint as the prior webhook-debug entry — this
+  session cannot receive a real Meta webhook). Confirmed the new signature-based comparison correctly
+  triggers a re-render on a simulated status-only change (same message count, different `status`
+  value) where the old count-based check would not have. Did not have live access to re-verify
+  against `hyther.in`.
+- **Remaining Meta dashboard steps for the client:** none newly identified by this pass — the
+  previous entry's ask (double-check the WhatsApp "messages" field Callback URL) is now lower
+  priority given the Test-button payload proves that URL is already correct; the actionable next
+  step is simply to have a **real second phone** message the business number and then check
+  `integrationLogs` for a `webhook_received` row at that moment — if it's missing, the request isn't
+  reaching Meta's webhook system at all (an App Review/permissions/business-verification issue on
+  Meta's side, not this codebase); if it's present but no `message_received`/`created` row follows,
+  that would be the first actual evidence of a real code-level parsing/insert failure to investigate
+  next.
+
 **Phase 7 (partial — see "requires production access" below, 2026-09-28):** Production hardening,
 deployment prep, and handover documentation. **This phase was worked entirely from the local WAMP
 dev environment — no Hostinger/production server or real provider (Meta/Google/WhatsApp) accounts
@@ -759,6 +837,51 @@ detail now lives in [README.md](README.md)'s "Production deployment" section (no
   the production admin account; live Meta/Google/WhatsApp credential setup and end-to-end
   verification with real accounts; real SMTP delivery test; final legal sign-off on the 3 legal
   pages; an actual backup/restore exercise (there is no production system yet to back up).
+
+**Meta Lead Ads + Google Lead Forms audit/fix (2026-10-03):** both were already fully built in
+Phase 6 (webhook/endpoint, settings/secrets, mapping, logs, `createLeadFromSource()` dedup, gateway
+allowlist, Integrations card UI) — nothing rebuilt, no UI/DB/migration change. Real gaps patched:
+- **Phone bug (Meta + Google):** E.164 numbers (`+919876543210`) were stored as 12 digits with
+  `+91`, breaking dedup and WhatsApp/call links. New `splitExternalPhone()` in
+  `includes/integrationAccess.php` (91/0-prefix → 10 digits + `+91`; other international numbers
+  kept whole with empty country code). Website endpoint untouched.
+- **Meta Graph fetch failures were opaque:** `metaGraphApiGet()` now returns Meta's real
+  `error.message` / curl transport error via a by-ref `$error`, written to the Integration Log
+  ("Graph API fetch failed: ..."); Graph version v19.0 → v21.0. `meta-webhook.php` also logs an
+  `webhook_received` row for every correctly signed POST (bad signatures still log
+  "Invalid or missing signature"), so "did Meta reach us" is answerable.
+- **Google test button:** `is_test=true` payloads are acknowledged 200 and logged but no lead is created.
+- Files: `includes/integrationAccess.php`, `api/integrations/meta-webhook.php`, `api/integrations/google-lead.php`, this file.
+- Tested locally (curl): Google valid/duplicate/bad key/test lead; Meta handshake ok/bad token 403,
+  signed POST, bad signature 401, no page token logged; Graph error text surfaced with a fake token.
+  Not live-verified (no real Meta token / Google Ads account). WhatsApp files untouched.
+- **Validation pass (2026-10-03, no code bugs found, no code changed):**
+  - Browser (Playwright/Chromium, admin session, 1440px + 390px): Configure modals for Meta/Google
+    open with correct endpoint URL + fields, secrets never echoed (blank by design — verifyToken
+    included, saving blank keeps stored value; handshake still works after UI saves), disable/enable
+    save updates Status badge, Connected badge, Last Successful Lead/Last Error; Meta form mapping
+    add/list/edit works; log table loads; zero console/page/network errors; no horizontal overflow.
+  - Google (real endpoint, curl): public, bad key 401, `is_test` creates nothing, valid lead created
+    (source `google_ads`, actor `system`), duplicate ignored, mapped form → project + assignee applied,
+    missing phone 422, Last Successful Lead/Last Error update, logs written.
+  - Meta (curl): handshake ok / bad token 403, bad signature 401, signed POST extracts `leadgen_id`,
+    Graph call uses configured Page Access Token, Graph/transport error reaches Integration Log +
+    Last Error. **Not exercised** (needs a real token; no fake Graph success was used): successful
+    Graph fetch → lead creation, Meta duplicate, Meta mapping — that code is the same block as Google's.
+  - Regression: PHP lint on all `api/` + `includes/` files clean; Leads/Integrations/WhatsApp/
+    Dashboard/Reports/Projects pages 200; tested APIs 401 without session; WhatsApp inbound webhook
+    creates conversation+message; WhatsApp send reaches Graph (fails only on the known unrestarted-
+    Apache CA bundle). No committed regression suite exists to re-run. All test rows deleted.
+  - Note: `rejected` outcomes (e.g. missing phone) are logged but do not set Last Error; only `error` does.
+- **Bug fix — Meta verify token never saved from the UI (2026-10-03):** the Configure modal is ONE
+  form containing every provider's field group (hidden ones just `d-none`), and `$(form).serialize()`
+  submits hidden fields too. Meta and WhatsApp both use `secrets[verifyToken]` / `secrets[appSecret]`;
+  PHP keeps the last duplicate, so the (blank) WhatsApp inputs overwrote Meta's value, and a blank
+  value means "keep existing" — the new token was silently discarded and the handshake kept failing.
+  Fix (`dist/assets/js/integrations.js`, 3 lines at modal open): disable inputs of hidden provider
+  groups so they aren't serialized. Backend untouched. Verified in browser: saving a new Meta Verify
+  Token → `hub.mode` handshake returns `12345`, wrong/old token → "Verification failed.", blank re-save
+  keeps the token, WhatsApp blank save still keeps its secrets. Applies equally to Meta App Secret.
 
 **Historical Phase 1 gaps (fixed in Phase 2/3):**
 - `api/leads/*` and `api/employee/*` (except `addEmployee`), `api/company/*`: no CSRF; lead APIs check session only, not route/action permission; `permissionActions` has no API mappings yet.

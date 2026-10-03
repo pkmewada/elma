@@ -90,6 +90,9 @@ $(function () {
         $("#configSourceAssigneeRow").toggleClass("d-none", provider === "whatsapp");
         $(".provider-fields").addClass("d-none");
         $("#" + provider + "Fields").removeClass("d-none");
+        // Hidden provider groups share field names (verifyToken/appSecret); disabled inputs are not serialized.
+        $(".provider-fields").find(":input").prop("disabled", true);
+        $("#" + provider + "Fields").find(":input").prop("disabled", false);
 
         if (provider === "whatsapp") {
             var wc = s.config || {};

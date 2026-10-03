@@ -66,6 +66,14 @@ if (is_array($userColumnData)) {
     }
 }
 
+// Google's "Send test data" button posts is_test=true; acknowledge it (so the
+// admin sees success) without creating a fake lead in the CRM.
+if (!empty($payload['is_test'])) {
+    logIntegrationEvent($con, PROVIDER, $externalLeadId, 'lead_form', null, 'rejected', 'Test lead acknowledged, not created', ['form_id' => $formId]);
+    echo json_encode(['success' => true, 'message' => 'Test lead received.', 'data' => []]);
+    exit;
+}
+
 $normalized = normalizeExternalLeadFields($flat + (is_array($payload) ? $payload : []));
 
 if ($normalized['phone'] === '' || strlen($normalized['phone']) < 6) {
@@ -73,6 +81,7 @@ if ($normalized['phone'] === '' || strlen($normalized['phone']) < 6) {
     integrationJsonExit(422, 'Missing required phone field.');
 }
 
+$phoneParts = splitExternalPhone($normalized['phone']);
 $mapping = $formId !== '' ? getFormMapping($con, PROVIDER, $formId) : null;
 $config = getIntegrationConfig($con, PROVIDER);
 $defaultSourceId = (int)($config['defaultSourceId'] ?? 0);
@@ -108,7 +117,7 @@ if ($mapping && $mapping['defaultAssigneeId']) {
 
 try {
     $result = createLeadFromSource($con, PROVIDER, $externalLeadId, [
-        'fullName' => $normalized['fullName'], 'phone' => $normalized['phone'], 'country' => 'India', 'countryCode' => '+91',
+        'fullName' => $normalized['fullName'], 'phone' => $phoneParts['phone'], 'country' => $phoneParts['country'], 'countryCode' => $phoneParts['countryCode'],
         'email' => $normalized['email'],
         'sourceId' => (int)$source['id'], 'sourceName' => $source['sourceName'],
         'projectId' => $projectId, 'projectName' => $projectName,

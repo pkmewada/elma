@@ -64,6 +64,9 @@ if (!verifyMetaSignature($rawBody, (string)($secrets['appSecret'] ?? ''), $_SERV
 }
 
 $payload = json_decode($rawBody, true);
+logIntegrationEvent($con, PROVIDER, null, 'webhook_received', null, 'received', 'POST received', [
+    'bytes' => strlen($rawBody), 'object' => $payload['object'] ?? null, 'entries' => is_array($payload['entry'] ?? null) ? count($payload['entry']) : 0,
+]);
 $entries = is_array($payload['entry'] ?? null) ? $payload['entry'] : [];
 $accessToken = (string)($secrets['pageAccessToken'] ?? '');
 $processed = 0;
@@ -88,10 +91,11 @@ foreach ($entries as $entry) {
         }
 
         // Meta's webhook never carries customer fields, only the id to fetch them with.
-        $leadDetails = metaGraphApiGet($leadgenId, $accessToken);
+        $graphError = null;
+        $leadDetails = metaGraphApiGet($leadgenId, $accessToken, $graphError);
 
         if ($leadDetails === null) {
-            logIntegrationEvent($con, PROVIDER, $leadgenId, 'lead_event', null, 'error', 'Graph API fetch failed', ['form_id' => $formId]);
+            logIntegrationEvent($con, PROVIDER, $leadgenId, 'lead_event', null, 'error', 'Graph API fetch failed: ' . $graphError, ['form_id' => $formId]);
             continue;
         }
 
@@ -103,6 +107,7 @@ foreach ($entries as $entry) {
             continue;
         }
 
+        $phoneParts = splitExternalPhone($normalized['phone']);
         $mapping = $formId !== '' ? getFormMapping($con, PROVIDER, $formId) : null;
         $config = getIntegrationConfig($con, PROVIDER);
         $defaultSourceId = (int)($config['defaultSourceId'] ?? 0);
@@ -135,7 +140,7 @@ foreach ($entries as $entry) {
 
         try {
             $result = createLeadFromSource($con, PROVIDER, $leadgenId, [
-                'fullName' => $normalized['fullName'], 'phone' => $normalized['phone'], 'country' => 'India', 'countryCode' => '+91',
+                'fullName' => $normalized['fullName'], 'phone' => $phoneParts['phone'], 'country' => $phoneParts['country'], 'countryCode' => $phoneParts['countryCode'],
                 'email' => $normalized['email'],
                 'sourceId' => (int)$source['id'], 'sourceName' => $source['sourceName'],
                 'projectId' => $projectId, 'projectName' => $projectName,

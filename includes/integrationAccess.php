@@ -213,9 +213,9 @@ function verifyWebsiteApiKey(string $configuredKey, ?string $submittedKey): bool
  * customer fields. Returns the decoded response or null on any failure
  * (network error, invalid token, missing lead); never throws to the caller.
  */
-function metaGraphApiGet(string $path, string $accessToken): ?array
+function metaGraphApiGet(string $path, string $accessToken, ?string &$error = null): ?array
 {
-    $url = 'https://graph.facebook.com/v19.0/' . ltrim($path, '/') . '?access_token=' . urlencode($accessToken);
+    $url = 'https://graph.facebook.com/v21.0/' . ltrim($path, '/') . '?access_token=' . urlencode($accessToken);
 
     $ch = curl_init($url);
     curl_setopt_array($ch, [
@@ -225,15 +225,35 @@ function metaGraphApiGet(string $path, string $accessToken): ?array
     ]);
     $response = curl_exec($ch);
     $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $curlError = curl_error($ch);
     curl_close($ch);
 
-    if ($response === false || $httpCode !== 200) {
+    $decoded = $response === false ? null : json_decode($response, true);
+
+    if ($response === false || $httpCode !== 200 || !is_array($decoded)) {
+        // Safe to store: Meta's error text and curl transport text never contain the token.
+        $metaMessage = is_array($decoded) ? ($decoded['error']['message'] ?? null) : null;
+        $error = $metaMessage ?: ($response === false ? 'Could not reach Meta: ' . $curlError : 'HTTP ' . $httpCode);
+
         return null;
     }
 
-    $decoded = json_decode($response, true);
+    return $decoded;
+}
 
-    return is_array($decoded) ? $decoded : null;
+/**
+ * Splits a digits-only external phone into the CRM's (countryCode, phone)
+ * shape. Meta/Google send E.164 ("+919876543210"); the CRM stores the local
+ * 10 digits with "+91" (same convention as splitWaIdForLead()). Any other
+ * international number is kept whole with no country code, never guessed.
+ */
+function splitExternalPhone(string $digits): array
+{
+    if (preg_match('/^(?:91|0)?(\d{10})$/', $digits, $m)) {
+        return ['countryCode' => '+91', 'country' => 'India', 'phone' => $m[1]];
+    }
+
+    return ['countryCode' => '', 'country' => '', 'phone' => $digits];
 }
 
 /** Meta's field_data is [{name: 'full_name', values: ['John Doe']}, ...]; flatten to name => value. */
